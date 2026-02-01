@@ -1,0 +1,29 @@
+# =========================
+# MI4L Default Configuration
+# =========================
+
+video:
+  max_fps: null        # set to e.g. 30 to downsample, null = keep original
+  min_subject_height_px: 300  # minimum person bbox height for reliable angles
+
+pose:
+  model: mediapipe
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+angles:
+  smoothing:
+    enabled: true
+    method: median      # median | savgol
+    window_size: 5
+
+arom_prom:
+  peak_method: topk     # topk | plateau
+  topk_percent: 0.03    # top 3% frames
+  plateau:
+    tolerance_deg: 3.0
+    min_frames: 5
+
+qc:
+  min_visible_landmarks_ratio: 0.9
+  max_angle_derivative_deg_per_frame: 15.0
