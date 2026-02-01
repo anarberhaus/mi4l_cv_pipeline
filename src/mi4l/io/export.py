@@ -5,8 +5,6 @@ from typing import Any
 
 import pandas as pd
 
-from mi4l.utils.config import save_config
-
 
 def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,4 +29,9 @@ def save_summary_csv(df: pd.DataFrame, path: str | Path) -> None:
 
 
 def save_config_used(cfg: dict[str, Any], path: str | Path) -> None:
-    save_config(cfg, path)
+    p = Path(path)
+    _ensure_parent(p)
+    import yaml
+    with p.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+

@@ -24,5 +24,3 @@ def get_video_info(video_path: str) -> dict:
         "resolution": (w, h),
         "duration_s": duration_s,
     }
-
-#python scripts/run_mi4l.py --video "data\test.mp4"
