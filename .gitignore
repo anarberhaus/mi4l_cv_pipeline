@@ -1,0 +1,26 @@
+# data / outputs
+data/
+results/
+*.mp4
+*.mov
+*.avi
+
+# python junk
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# venv / env
+.venv/
+venv/
+.env
+
+# editor / OS
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+
+*.egg-info/
