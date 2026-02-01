@@ -1,29 +1,57 @@
-# =========================
-# MI4L Default Configuration
-# =========================
-
-video:
-  max_fps: null        # set to e.g. 30 to downsample, null = keep original
-  min_subject_height_px: 300  # minimum person bbox height for reliable angles
-
 pose:
-  model: mediapipe
+  backend: mediapipe
+  model_complexity: 1
+  static_image_mode: false
+  smooth_landmarks: true
+  enable_segmentation: false
   min_detection_confidence: 0.5
   min_tracking_confidence: 0.5
+  frame_stride: 1
 
 angles:
-  smoothing:
-    enabled: true
-    method: median      # median | savgol
-    window_size: 5
-
-arom_prom:
-  peak_method: topk     # topk | plateau
-  topk_percent: 0.03    # top 3% frames
-  plateau:
-    tolerance_deg: 3.0
-    min_frames: 5
+  joints:
+    - knee_flexion
 
 qc:
-  min_visible_landmarks_ratio: 0.9
-  max_angle_derivative_deg_per_frame: 15.0
+  landmark_visibility_threshold: 0.5
+  min_valid_ratio: 0.3
+  min_valid_frames: 15
+
+  min_bbox_height_px: 200
+  require_subject_size: true
+
+  edge_margin: 0.02
+  exclude_clipped_frames: false
+  max_clipped_ratio: 0.35
+
+  derivative_deg_per_sec_max: 600.0
+
+smoothing:
+  method: median         # none | median | savgol
+  interpolate_limit: 5
+
+  median_window: 7
+
+  savgol_window: 11
+  savgol_polyorder: 3
+
+robust_max:
+  method: topk_median
+  topk_percent: 0.05
+  min_topk_frames: 5
+
+mi4l:
+  prom_min_deg: 1.0
+  prom_lt_arom_tolerance_deg: 2.0
+  invalidate_if_prom_lt_arom: true
+
+export:
+  save_landmarks_csv: true
+  save_angles_csv: true
+  save_summary_csv: true
+
+  save_config_used: true
+
+  plots:
+    enabled: true
+    dpi: 150
