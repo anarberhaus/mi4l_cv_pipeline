@@ -15,6 +15,7 @@ class RobustMaxResult:
     n_valid: int
     n_used: int
     flags: list[str]
+    frames_used: list[int] = ()
 
 
 def smooth_angle_series(angle_deg: pd.Series, smoothing_cfg: dict[str, Any]) -> pd.Series:
@@ -110,10 +111,21 @@ def estimate_robust_max(
     k = min(n_valid, k)
 
     v = values[ok]
+    # original indices of the valid entries (relative to the input series index)
+    valid_idx = np.nonzero(ok)[0]
     # Take top-K by value
     order = np.argsort(v)[::-1]
-    v_top = v[order[:k]]
+    top_order = order[:k]
+    v_top = v[top_order]
     est = float(np.nanmedian(v_top)) if v_top.size > 0 else float("nan")
+
+    # Map back to original series index labels for the frames used
+    frames_used = []
+    try:
+        idx_labels = angle_deg.index.to_numpy()
+        frames_used = [int(idx_labels[valid_idx[i]]) for i in top_order]
+    except Exception:
+        frames_used = [int(valid_idx[i]) for i in top_order]
 
     if not np.isfinite(est):
         return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=k, flags=flags + ["est_nan"])
@@ -135,4 +147,5 @@ def estimate_robust_max(
         n_valid=n_valid,
         n_used=k,
         flags=flags,
+        frames_used=frames_used,
     )
