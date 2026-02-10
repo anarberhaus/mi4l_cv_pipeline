@@ -337,7 +337,7 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 c_name = f"{side}_ankle"
 
             # output filename
-            fname = f"{metric_base}_{side}_max.png"
+            fname = f"{metric_base}_{side}_{kind}_max.png"
             out_path = snap_dir / fname
 
             # angle value to show: use est.value_deg if present

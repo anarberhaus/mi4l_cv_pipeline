@@ -77,33 +77,66 @@ def save_snapshot(
     if B is not None:
         cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
 
-    # draw angle arc at B if possible
+    # draw angle arc at B
+    # To visualize the external angle (flexion from straight), we want the angle between:
+    # Vector 1: Extension of thigh (A->B extended)
+    # Vector 2: Lower leg (B->C)
     if A is not None and B is not None and C is not None:
-        # compute vectors BA and BC
+        # Vector BA = A - B
         bax = A[0] - B[0]
         bay = A[1] - B[1]
+        
+        # Extend BA through B to find "straight" reference D
+        # D = B - (A-B) = 2B - A
+        # Or simpler vector direction from B is -BA
+        dx = -bax
+        dy = -bay
+        
+        # Normalize extension vector for drawing
+        d_len = math.hypot(dx, dy)
+        if d_len > 0:
+            scale = 100.0 / d_len
+            D = (int(B[0] + dx * scale), int(B[1] + dy * scale))
+            # Draw gray extension line
+            cv2.line(frame, B, D, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+
+        # Vector BC = C - B
         bcx = C[0] - B[0]
         bcy = C[1] - B[1]
-
-        ang1 = math.degrees(math.atan2(-bay, bax))
-        ang2 = math.degrees(math.atan2(-bcy, bcx))
-        # OpenCV ellipse uses clockwise from x-axis; compute start/end
-        start = float(ang1)
-        end = float(ang2)
-        # normalize
+        
+        # Angle of extension vector (reference 0)
+        ang_ref = math.degrees(math.atan2(dy, dx))
+        
+        # Angle of lower leg
+        ang_leg = math.degrees(math.atan2(bcy, bcx))
+        
+        # OpenCV ellipse draws clockwise? No, standard is counter-clockwise but y-axis is down.
+        # Let's use simple start/end.
+        start = float(ang_ref)
+        end = float(ang_leg)
+        
+        # normalize to positive range
         while end < start:
-            end += 360.0
-        sweep = end - start
-        # choose radius relative to min distance
-        r = max(20, int(min(math.hypot(bax, bay), math.hypot(bcx, bcy)) / 2))
+             end += 360.0
+        
+        # Adjust direction if needed (users prefer acute/obtuse correctly)
+        # If difference > 180, interpret as the other way
+        if (end - start) > 180:
+            start += 360
+            start, end = end, start
+
+        # choose radius
+        r = max(40, int(min(math.hypot(bax, bay), math.hypot(bcx, bcy)) / 2.5))
         center = B
         axes = (r, r)
-        # draw ellipse arc
+        
+        # draw ellipse arc (cyan)
+        # 0.0 is angle of main axes rotation
         cv2.ellipse(frame, center, axes, 0.0, start, end, (255, 200, 0), thickness=3)
 
-    # write angle text
+    # write angle text (no degree symbol to avoid artifacts)
     if angle_deg is not None and B is not None:
-        txt = f"{float(angle_deg):.1f}°"
+        txt = f"{float(angle_deg):.1f}"
         pos = (B[0] + 10, max(20, B[1] - 10))
         cv2.putText(frame, txt, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
 
