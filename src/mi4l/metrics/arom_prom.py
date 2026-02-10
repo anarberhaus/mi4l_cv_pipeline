@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -15,7 +15,7 @@ class RobustMaxResult:
     n_valid: int
     n_used: int
     flags: list[str]
-    frames_used: list[int] = ()
+    frames_used: list[int] = field(default_factory=list)
 
 
 def smooth_angle_series(angle_deg: pd.Series, smoothing_cfg: dict[str, Any]) -> pd.Series:
@@ -109,6 +109,39 @@ def estimate_robust_max(
     k = int(np.ceil(topk_percent * n_valid))
     k = max(min_topk_frames, k)
     k = min(n_valid, k)
+
+    # Filter out short spikes if min_hold_frames is set
+    min_hold_frames = int(robust_cfg.get("min_hold_frames", 0))
+    if min_hold_frames > 1:
+        # We need to filter 'ok' to only include runs of True that are >= min_hold_frames
+        # This is a simple erosion/opening-like operation on the boolean mask
+        # but we need to respect the original index gaps?
+        # Simpler: just look at the boolean array 'ok'.
+        # If we have [T, T, F, T, T, T, F], and min_hold=3, we keep only the 3 Ts.
+        
+        # Identify runs
+        padded = np.concatenate(([False], ok, [False]))
+        changes = np.diff(padded.astype(int))
+        starts = np.where(changes == 1)[0]
+        ends = np.where(changes == -1)[0]
+        
+        mask_filtered = np.zeros_like(ok, dtype=bool)
+        for s, e in zip(starts, ends):
+            if (e - s) >= min_hold_frames:
+                mask_filtered[s:e] = True
+        
+        # Update ok mask
+        ok = mask_filtered
+        # Re-calc n_valid
+        n_valid = int(ok.sum())
+        if n_valid == 0:
+             return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=0, n_used=0, flags=flags + ["no_valid_hold"])
+        
+        # Re-calc k based on new n_valid? 
+        # Usually we want k to be based on the *filtered* valid count to pick the peak of the hold.
+        k = int(np.ceil(topk_percent * n_valid))
+        k = max(min_topk_frames, k)
+        k = min(n_valid, k)
 
     v = values[ok]
     # original indices of the valid entries (relative to the input series index)

@@ -191,20 +191,42 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, po
             frames_used = list(getattr(est, "frames_used", []) or [])
             if not frames_used:
                 return
-            # pick median label
-            try:
-                mid_label = int(np.median(np.array(frames_used, dtype=float)))
-            except Exception:
-                mid_label = int(frames_used[len(frames_used) // 2])
+            # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
+            frames_used = sorted(list(frames_used))
+            if not frames_used:
+                return
 
-            # map label to angles_df index/position to get video frame index
+            # Simple clustering: split if gap > 10 frames (approx 0.3s at 30fps)
+            clusters = []
+            if frames_used:
+                current_cluster = [frames_used[0]]
+                for f in frames_used[1:]:
+                    if f - current_cluster[-1] > 10:
+                        clusters.append(current_cluster)
+                        current_cluster = [f]
+                    else:
+                        current_cluster.append(f)
+                clusters.append(current_cluster)
+
+            # Pick largest cluster
+            largest_cluster = max(clusters, key=len)
+            
+            # Pick median of the largest cluster
+            try:
+                mid_label = int(np.median(np.array(largest_cluster, dtype=float)))
+            except Exception:
+                mid_label = int(largest_cluster[len(largest_cluster) // 2])
+
+            # map label to angles_df index/position
             if mid_label in angles_df.index:
                 ang_row = angles_df.loc[mid_label]
             else:
-                # treat as position
-                try:
-                    ang_row = angles_df.iloc[mid_label]
-                except Exception:
+                # fallback: try to find row with frame_idx == mid_label
+                # (This depends on if index is frame_idx or simple range)
+                rows = angles_df[angles_df["frame_idx"] == mid_label]
+                if len(rows) > 0:
+                    ang_row = rows.iloc[0]
+                else:
                     return
 
             video_frame_idx = int(ang_row["frame_idx"])

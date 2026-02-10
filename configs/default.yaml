@@ -17,7 +17,7 @@ qc:
   min_valid_ratio: 0.3
   min_valid_frames: 15
 
-  min_bbox_height_px: 200
+  min_bbox_height_px: 150
   require_subject_size: true
 
   edge_margin: 0.02
@@ -37,8 +37,9 @@ smoothing:
 
 robust_max:
   method: topk_median
-  topk_percent: 0.05
+  topk_percent: 0.10
   min_topk_frames: 5
+  min_hold_frames: 15
 
 mi4l:
   prom_min_deg: 1.0
