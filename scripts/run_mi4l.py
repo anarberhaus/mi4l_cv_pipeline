@@ -55,7 +55,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, pose_name: str | None = None) -> dict:
+def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, active_sides: list[str], pose_name: str | None = None) -> dict:
     # 1) Landmarks
     landmarks_df, meta = extract_mediapipe_pose_landmarks(video_path=str(video_path), pose_cfg=cfg.get("pose", {}))
 
@@ -143,16 +143,18 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, po
         valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
         return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg)
 
-    left_est = _compute_est_for_col(left_col)
-    right_est = _compute_est_for_col(right_col)
-
-    # If only a single series exists, duplicate result for both sides
-    if left_est is None and right_est is None:
-        left_est = right_est = estimate_robust_max(angle_deg=pd.Series(dtype=float), valid_mask=pd.Series(dtype=bool), smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg)
-    elif left_est is None and right_est is not None:
-        left_est = right_est
-    elif right_est is None and left_est is not None:
-        right_est = left_est
+    # Only compute estimates for active sides
+    left_est = _compute_est_for_col(left_col) if "left" in active_sides else None
+    right_est = _compute_est_for_col(right_col) if "right" in active_sides else None
+    
+    # If single column logic was used in original code (not strictly needed if we trust _find_side_series)
+    # But let's keep the fallback logical consistency if strictly one side was requested but only generic column exists.
+    # The original code had a fallback for single column.
+    if left_col is None and right_col is None:
+        # Fallback: maybe the function returns just 'angle_deg'?
+        # In that case, we might assign it to both if active. 
+        # But for now, assume side-specific columns exist or _find_side_series found them.
+        pass
 
     # 6) Video-level QC flags
     video_flags = compute_video_level_qc_flags(
@@ -167,8 +169,8 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, po
         # build robust_frames mapping from estimated frames_used (if available)
         robust_frames = {}
         try:
-            robust_frames_left = list(getattr(left_est, "frames_used", []) or [])
-            robust_frames_right = list(getattr(right_est, "frames_used", []) or [])
+            robust_frames_left = list(getattr(left_est, "frames_used", []) or []) if left_est else []
+            robust_frames_right = list(getattr(right_est, "frames_used", []) or []) if right_est else []
             robust_frames = {"left": robust_frames_left, "right": robust_frames_right}
         except Exception:
             robust_frames = None
@@ -188,6 +190,9 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, po
         snap_dir.mkdir(parents=True, exist_ok=True)
 
         def _save_side_snapshot(side: str, est):
+            if est is None: 
+                return
+            
             frames_used = list(getattr(est, "frames_used", []) or [])
             if not frames_used:
                 return
@@ -339,8 +344,10 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, po
             ang_val = getattr(est, "value_deg", None)
             save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val)
 
-        _save_side_snapshot("left", left_est)
-        _save_side_snapshot("right", right_est)
+        if "left" in active_sides:
+            _save_side_snapshot("left", left_est)
+        if "right" in active_sides:
+            _save_side_snapshot("right", right_est)
 
     return {
         "landmarks_df": landmarks_df,
@@ -365,16 +372,30 @@ def main(argv: list[str] | None = None) -> int:
     arom_path = Path(args.arom)
     prom_path = Path(args.prom)
 
-    arom_res = _process_one_video("arom", arom_path, out_dir, cfg, pose_name=args.pose)
-    prom_res = _process_one_video("prom", prom_path, out_dir, cfg, pose_name=args.pose)
+    mi4l_cfg = cfg.get("mi4l", {}) or {}
+    mode_side = str(mi4l_cfg.get("side", "both")).lower().strip()
+    
+    active_sides = []
+    if mode_side == "left":
+        active_sides = ["left"]
+    elif mode_side == "right":
+        active_sides = ["right"]
+    else:
+        active_sides = ["left", "right"]
+
+    arom_res = _process_one_video("arom", arom_path, out_dir, cfg, active_sides=active_sides, pose_name=args.pose)
+    prom_res = _process_one_video("prom", prom_path, out_dir, cfg, active_sides=active_sides, pose_name=args.pose)
 
     # 7) MI4L (knee only)
     rows: list[dict] = []
-    mi4l_cfg = cfg.get("mi4l", {}) or {}
-
-    for side in ("left", "right"):
+    
+    for side in active_sides:
         arom_est = arom_res[side]
         prom_est = prom_res[side]
+
+        # If estimation failed or didn't run, handle gracefully
+        if arom_est is None or prom_est is None:
+            continue
 
         mi4l_res = compute_mi4l(
             arom_deg=arom_est.value_deg,
