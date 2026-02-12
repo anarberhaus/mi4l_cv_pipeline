@@ -122,6 +122,13 @@ def compute_trunk_extension_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     vy = sy_mid - hy_mid
 
     deg = angle_orientation_deg(vx, vy, ref_axis="horizontal")
+    
+    # Special handling for trunk extension:
+    # When lying flat, torso points backward (180°), which should be ~0°
+    # When extended, torso points up (90°)
+    # So we want: 180° → 0°, 90° → 90°, 0° → 0°
+    # Solution: remap angles > 90° as (180 - angle)
+    deg = np.where(deg > 90, 180.0 - deg, deg)
 
     out = pd.DataFrame(
         {
