@@ -16,17 +16,15 @@ def _to_px(coord: tuple[float, float], w: int, h: int) -> tuple[int, int]:
 def save_snapshot(
     video_path: str | Path,
     landmarks_row: dict,
-    a_name: str,
+    a_name: str | None,
     b_name: str,
     c_name: str,
     out_path: str | Path,
     angle_deg: float | None = None,
+    angle_mode: str = "auto",  # "auto", "internal", "vertical", "horizontal"
 ) -> None:
     """
     Save a snapshot image for a single frame described by `landmarks_row`.
-
-    `landmarks_row` should contain normalized coords like 'left_hip_x', 'left_hip_y'
-    and `image_w`/`image_h` pixel dims.
     """
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -35,7 +33,6 @@ def save_snapshot(
     if not cap.isOpened():
         raise FileNotFoundError(f"Could not open video: {video_path}")
 
-    # landmarks_row expected to have 'frame_idx' key with video frame number
     frame_idx = int(landmarks_row.get("frame_idx", 0))
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ok, frame = cap.read()
@@ -44,7 +41,6 @@ def save_snapshot(
         raise RuntimeError(f"Could not read frame {frame_idx} from {video_path}")
 
     h, w = frame.shape[:2]
-    # Prefer explicit image_w/image_h if present (should match)
     if "image_w" in landmarks_row and "image_h" in landmarks_row:
         try:
             w = int(landmarks_row.get("image_w", w))
@@ -52,7 +48,9 @@ def save_snapshot(
         except Exception:
             pass
 
-    def _pt(name: str) -> tuple[int, int] | None:
+    def _pt(name: str | None) -> tuple[int, int] | None:
+        if name is None:
+            return None
         xk = f"{name}_x"
         yk = f"{name}_y"
         if xk not in landmarks_row or yk not in landmarks_row:
@@ -67,77 +65,174 @@ def save_snapshot(
     B = _pt(b_name)
     C = _pt(c_name)
 
-    # draw lines and points
-    if A is not None and B is not None:
-        cv2.line(frame, A, B, (0, 200, 0), thickness=4)
-        cv2.circle(frame, A, radius=6, color=(0, 200, 0), thickness=-1)
+    # Auto-infer mode if needed
+    mode = angle_mode
+    if mode == "auto":
+        if "knee" in b_name:
+            mode = "horizontal"
+        elif "hip" in b_name or "shoulder" in b_name:
+            if "midpoint" in b_name and "shoulder" in b_name:
+                mode = "horizontal"
+            elif "midpoint" in a_name and "shoulder" in a_name and "hip" in b_name:    
+                mode = "vertical"
+            elif "midpoint" in a_name and "hip" in a_name and "shoulder" in b_name:
+                 mode = "vertical"
+            elif "hip" in b_name:
+                 mode = "vertical"
+            elif "shoulder" in b_name:
+                 mode = "vertical"
+            else:
+                 mode = "internal"
+        elif "pelvis" in b_name:
+            mode = "internal"
+        else:
+            mode = "internal"
+
+    # Draw points based on mode
+    # For orientation modes (vertical/horizontal), only draw B and C
+    # For internal mode, draw A, B, C
+    if mode in ["vertical", "horizontal"]:
+        # Orientation-based: only show pivot (B) and endpoint (C)
+        if B is not None:
+            cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
+        if C is not None:
+            cv2.circle(frame, C, radius=6, color=(0, 200, 0), thickness=-1)
+    else:
+        # Internal angle: show all three points
+        if A is not None:
+            cv2.circle(frame, A, radius=6, color=(0, 200, 0), thickness=-1)
+        if B is not None:
+            cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
+        if C is not None:
+            cv2.circle(frame, C, radius=6, color=(0, 200, 0), thickness=-1)
+
+    # Draw lines and arc based on mode
     if B is not None and C is not None:
-        cv2.line(frame, B, C, (0, 200, 0), thickness=4)
-        cv2.circle(frame, C, radius=6, color=(0, 200, 0), thickness=-1)
-    if B is not None:
-        cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
+        start_angle = 0.0
+        end_angle = 0.0
+        draw_arc = False
+        
+        # 1. Orientation Modes
+        if mode in ["vertical", "horizontal"]:
+            # Draw segment B->C
+            cv2.line(frame, B, C, (0, 200, 0), thickness=4)
+            
+            # Vector B->C
+            bcx = C[0] - B[0]
+            bcy = C[1] - B[1]
+            seg_len = math.hypot(bcx, bcy)
+            ref_len = max(100.0, seg_len * 0.8)
+            
+            if mode == "vertical":
+                # Reference is DOWN (0, 1) -> +y in image
+                D = (B[0], int(B[1] + ref_len))
+                cv2.line(frame, B, D, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+                # CV2: 0°=Right, 90°=Down
+                ref_angle_cv2 = 90.0
+                
+            elif mode == "horizontal":
+                # Reference is RIGHT (1, 0)
+                D = (int(B[0] + ref_len), B[1])
+                cv2.line(frame, B, D, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+                # CV2: 0°=Right
+                ref_angle_cv2 = 0.0
 
-    # draw angle arc at B
-    # To visualize the external angle (flexion from straight), we want the angle between:
-    # Vector 1: Extension of thigh (A->B extended)
-    # Vector 2: Lower leg (B->C)
-    if A is not None and B is not None and C is not None:
-        # Vector BA = A - B
-        bax = A[0] - B[0]
-        bay = A[1] - B[1]
-        
-        # Extend BA through B to find "straight" reference D
-        # D = B - (A-B) = 2B - A
-        # Or simpler vector direction from B is -BA
-        dx = -bax
-        dy = -bay
-        
-        # Normalize extension vector for drawing
-        d_len = math.hypot(dx, dy)
-        if d_len > 0:
-            scale = 100.0 / d_len
-            D = (int(B[0] + dx * scale), int(B[1] + dy * scale))
-            # Draw gray extension line
-            cv2.line(frame, B, D, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+            # Calculate B->C angle in CV2 coordinates
+            vec_angle_cv2 = math.degrees(math.atan2(bcy, bcx))
+            
+            # Draw arc from reference to vector (interior angle)
+            # We want the SMALLER arc from ref to vec
+            start_angle = ref_angle_cv2
+            end_angle = vec_angle_cv2
+            
+            # Normalize angles to 0-360
+            start_angle = start_angle % 360
+            end_angle = end_angle % 360
+            
+            # Ensure we draw the shorter arc
+            diff = (end_angle - start_angle) % 360
+            if diff > 180:
+                # Swap to go the other way
+                start_angle, end_angle = end_angle, start_angle
+                diff = 360 - diff
+            
+            # Make sure end > start for cv2.ellipse
+            if end_angle < start_angle:
+                end_angle += 360
+                
+            draw_arc = True
+            
+        # 2. Internal Angle Mode
+        elif mode == "internal":
+            if A is not None:
+                cv2.line(frame, A, B, (0, 200, 0), thickness=4)
+                cv2.line(frame, B, C, (0, 200, 0), thickness=4)
+                
+                # Extension of A->B
+                bax = A[0] - B[0]
+                bay = A[1] - B[1]
+                dx, dy = -bax, -bay
+                d_len = math.hypot(dx, dy)
+                if d_len > 0:
+                    scale = 100.0 / d_len
+                    D = (int(B[0] + dx * scale), int(B[1] + dy * scale))
+                    cv2.line(frame, B, D, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+                    
+                    start_angle = math.degrees(math.atan2(dy, dx))
+                    bcx = C[0] - B[0]
+                    bcy = C[1] - B[1]
+                    end_angle = math.degrees(math.atan2(bcy, bcx))
+                    
+                    # Normalize and ensure shorter arc
+                    start_angle = start_angle % 360
+                    end_angle = end_angle % 360
+                    diff = (end_angle - start_angle) % 360
+                    if diff > 180:
+                        start_angle, end_angle = end_angle, start_angle
+                    if end_angle < start_angle:
+                        end_angle += 360
+                        
+                    draw_arc = True
+            else:
+                cv2.line(frame, B, C, (0, 200, 0), thickness=4)
 
-        # Vector BC = C - B
-        bcx = C[0] - B[0]
-        bcy = C[1] - B[1]
-        
-        # Angle of extension vector (reference 0)
-        ang_ref = math.degrees(math.atan2(dy, dx))
-        
-        # Angle of lower leg
-        ang_leg = math.degrees(math.atan2(bcy, bcx))
-        
-        # OpenCV ellipse draws clockwise? No, standard is counter-clockwise but y-axis is down.
-        # Let's use simple start/end.
-        start = float(ang_ref)
-        end = float(ang_leg)
-        
-        # normalize to positive range
-        while end < start:
-             end += 360.0
-        
-        # Adjust direction if needed (users prefer acute/obtuse correctly)
-        # If difference > 180, interpret as the other way
-        if (end - start) > 180:
-            start += 360
-            start, end = end, start
+        # Draw Arc
+        if draw_arc:
+            r = 40
+            cv2.ellipse(frame, B, (r, r), 0.0, start_angle, end_angle, (255, 200, 0), thickness=3)
 
-        # choose radius
-        r = max(40, int(min(math.hypot(bax, bay), math.hypot(bcx, bcy)) / 2.5))
-        center = B
-        axes = (r, r)
-        
-        # draw ellipse arc (cyan)
-        # 0.0 is angle of main axes rotation
-        cv2.ellipse(frame, center, axes, 0.0, start, end, (255, 200, 0), thickness=3)
-
-    # write angle text (no degree symbol to avoid artifacts)
+    # write angle text - position it next to the arc, not on top of points
     if angle_deg is not None and B is not None:
-        txt = f"{float(angle_deg):.1f}"
-        pos = (B[0] + 10, max(20, B[1] - 10))
+        txt = f"{float(angle_deg):.1f} deg"
+        
+        # Position text to the right and slightly below the arc
+        # Calculate a position that's offset from B in a clear area
+        if C is not None:
+            # Position text along the bisector of the angle, outside the arc
+            bcx = C[0] - B[0]
+            bcy = C[1] - B[1]
+            
+            # Normalize and scale to create offset
+            bc_len = math.hypot(bcx, bcy)
+            if bc_len > 0:
+                # Offset perpendicular to B->C, to the right side
+                offset_dist = 60  # pixels from B
+                # Use perpendicular direction (rotate 90°)
+                perp_x = -bcy / bc_len
+                perp_y = bcx / bc_len
+                
+                text_x = int(B[0] + perp_x * offset_dist)
+                text_y = int(B[1] + perp_y * offset_dist)
+            else:
+                # Fallback: offset to the right
+                text_x = B[0] + 50
+                text_y = B[1]
+        else:
+            # Fallback: offset to the right and down
+            text_x = B[0] + 50
+            text_y = B[1] + 20
+            
+        pos = (text_x, text_y)
         cv2.putText(frame, txt, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
 
     cv2.imwrite(str(p), frame)

@@ -11,6 +11,7 @@ def plot_knee_angles(
     title: str,
     dpi: int = 150,
     robust_frames: dict | None = None,
+    side: str | None = None,  # "left", "right", or None (both)
 ) -> None:
     try:
         import matplotlib.pyplot as plt  # type: ignore
@@ -27,14 +28,21 @@ def plot_knee_angles(
     right_color = "#ff7f0e"
     lw = 2.5
 
-    if "left_knee_flexion_deg" in angles_df.columns:
+    # Determine which sides to plot
+    plot_left = (side is None or side == "left") and "left_knee_flexion_deg" in angles_df.columns
+    plot_right = (side is None or side == "right") and "right_knee_flexion_deg" in angles_df.columns
+
+    if plot_left:
         plt.plot(t, angles_df["left_knee_flexion_deg"].to_numpy(dtype=float), label="Left", color=left_color, linewidth=lw)
-    if "right_knee_flexion_deg" in angles_df.columns:
+    if plot_right:
         plt.plot(t, angles_df["right_knee_flexion_deg"].to_numpy(dtype=float), label="Right", color=right_color, linewidth=lw)
 
     # Shade robust frames if provided (expects dict with 'left'/'right' list of indices into angles_df)
     if robust_frames is not None and isinstance(robust_frames, dict):
-        for side, idxs in robust_frames.items():
+        for side_key, idxs in robust_frames.items():
+            # Only shade if this side is being plotted
+            if side is not None and side_key != side:
+                continue
             if not idxs:
                 continue
             # Map indices to times
@@ -51,7 +59,11 @@ def plot_knee_angles(
     plt.xlabel("Time (s)")
     plt.ylabel("Angle (deg)")
     plt.title(title)
-    plt.legend(title="Side")
+    
+    # Only show legend if plotting both sides
+    if plot_left and plot_right:
+        plt.legend(title="Side")
+    
     plt.tight_layout()
     plt.savefig(p, dpi=int(dpi))
     plt.close()

@@ -14,6 +14,7 @@ from mi4l.angles.joint_angles import (
     compute_bilateral_leg_straddle_angle,
     compute_hip_extension_angles,
     compute_shoulder_flexion_angles,
+    compute_stick_pass_through_metrics,
 )
 from mi4l.io.export import (
     save_angles_csv,
@@ -42,6 +43,7 @@ POSE_TO_METRIC_FN = {
     "bilateral_leg_straddle": compute_bilateral_leg_straddle_angle,
     "unilateral_hip_extension": compute_hip_extension_angles,
     "shoulder_flexion": compute_shoulder_flexion_angles,
+    "shoulder_stick_pass_through": compute_stick_pass_through_metrics,
 }
 
 
@@ -175,12 +177,18 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         except Exception:
             robust_frames = None
 
+        # Determine which side to plot (for unilateral movements)
+        plot_side = None
+        if len(active_sides) == 1:
+            plot_side = active_sides[0]
+        
         plot_knee_angles(
             angles_df=angles_df,
             out_path=out_dir / f"plot_{pose_name}_{kind}.png",
             title=f"{pose_name} (deg) - {kind.upper()}",
             dpi=dpi,
             robust_frames=robust_frames,
+            side=plot_side,
         )
 
     # Snapshots: export frame image at median of top-K used frames (if provided)
