@@ -26,16 +26,38 @@ def plot_knee_angles(
     # aesthetics
     left_color = "#1f77b4"
     right_color = "#ff7f0e"
+    single_color = "#2ca02c"  # green for non-sided metrics
     lw = 2.5
 
+    # Auto-detect angle columns (ending with _deg, excluding time_sec)
+    angle_cols = [col for col in angles_df.columns if col.endswith("_deg") and col != "time_sec"]
+    
+    # Separate into left, right, and non-sided columns
+    left_cols = [col for col in angle_cols if col.startswith("left_")]
+    right_cols = [col for col in angle_cols if col.startswith("right_")]
+    other_cols = [col for col in angle_cols if col not in left_cols and col not in right_cols]
+    
     # Determine which sides to plot
-    plot_left = (side is None or side == "left") and "left_knee_flexion_deg" in angles_df.columns
-    plot_right = (side is None or side == "right") and "right_knee_flexion_deg" in angles_df.columns
+    plot_left = (side is None or side == "left") and len(left_cols) > 0
+    plot_right = (side is None or side == "right") and len(right_cols) > 0
+    plot_other = len(other_cols) > 0
 
+    # Plot left side columns
     if plot_left:
-        plt.plot(t, angles_df["left_knee_flexion_deg"].to_numpy(dtype=float), label="Left", color=left_color, linewidth=lw)
+        for col in left_cols:
+            plt.plot(t, angles_df[col].to_numpy(dtype=float), label="Left", color=left_color, linewidth=lw)
+    
+    # Plot right side columns
     if plot_right:
-        plt.plot(t, angles_df["right_knee_flexion_deg"].to_numpy(dtype=float), label="Right", color=right_color, linewidth=lw)
+        for col in right_cols:
+            plt.plot(t, angles_df[col].to_numpy(dtype=float), label="Right", color=right_color, linewidth=lw)
+    
+    # Plot non-sided columns (e.g., trunk_extension_deg)
+    if plot_other:
+        for col in other_cols:
+            # Extract a clean label from column name
+            label = col.replace("_deg", "").replace("_", " ").title()
+            plt.plot(t, angles_df[col].to_numpy(dtype=float), label=label, color=single_color, linewidth=lw)
 
     # Shade robust frames if provided (expects dict with 'left'/'right' list of indices into angles_df)
     if robust_frames is not None and isinstance(robust_frames, dict):
@@ -60,9 +82,9 @@ def plot_knee_angles(
     plt.ylabel("Angle (deg)")
     plt.title(title)
     
-    # Only show legend if plotting both sides
-    if plot_left and plot_right:
-        plt.legend(title="Side")
+    # Only show legend if plotting multiple series or both sides
+    if (plot_left and plot_right) or len(angle_cols) > 1:
+        plt.legend(title="Side" if (plot_left or plot_right) else None)
     
     plt.tight_layout()
     plt.savefig(p, dpi=int(dpi))

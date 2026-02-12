@@ -141,25 +141,23 @@ def save_snapshot(
             vec_angle_cv2 = math.degrees(math.atan2(bcy, bcx))
             
             # Draw arc from reference to vector (interior angle)
-            # We want the SMALLER arc from ref to vec
             start_angle = ref_angle_cv2
             end_angle = vec_angle_cv2
             
             # Normalize angles to 0-360
-            start_angle = start_angle % 360
-            end_angle = end_angle % 360
-            
-            # Ensure we draw the shorter arc
-            diff = (end_angle - start_angle) % 360
-            if diff > 180:
-                # Swap to go the other way
-                start_angle, end_angle = end_angle, start_angle
-                diff = 360 - diff
-            
-            # Make sure end > start for cv2.ellipse
-            if end_angle < start_angle:
+            if start_angle < 0:
+                start_angle += 360
+            if end_angle < 0:
                 end_angle += 360
-                
+            
+            # Calculate the angular difference
+            diff = (end_angle - start_angle) % 360
+            
+            # Choose the shorter arc direction
+            if diff > 180:
+                # Go the other way (swap and use 360 - diff)
+                start_angle, end_angle = end_angle, start_angle
+            
             draw_arc = True
             
         # 2. Internal Angle Mode
