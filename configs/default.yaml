@@ -42,7 +42,7 @@ robust_max:
   min_hold_frames: 15
 
 mi4l:
-  side: right  # both | left | right
+  side: both  # both | left | right
   prom_min_deg: 1.0
   prom_lt_arom_tolerance_deg: 2.0
   invalidate_if_prom_lt_arom: true

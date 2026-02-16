@@ -9,7 +9,8 @@ def angle_orientation_deg(v_x: np.ndarray, v_y: np.ndarray, ref_axis: str = "ver
     Computes orientation of vector (v_x, v_y) relative to a reference axis.
     
     Returns angles where reference = 0° and angles increase as segment moves away.
-    For horizontal reference, angles > 180° are remapped to keep starting position near 0°.
+    For both vertical and horizontal references, angles > 180° are remapped 
+    to keep starting position near 0°.
     """
     if ref_axis == "vertical":
         # 0 is down (0,1)
@@ -25,10 +26,10 @@ def angle_orientation_deg(v_x: np.ndarray, v_y: np.ndarray, ref_axis: str = "ver
     # Normalize to 0-360
     angle_deg = np.where(angle_deg < 0, angle_deg + 360.0, angle_deg)
     
-    # For horizontal reference: remap angles > 180 to maintain "distance from reference"
+    # Remap angles > 180 to maintain "distance from reference"
     # This ensures 357° becomes 3° (small angle near reference)
-    if ref_axis == "horizontal":
-        angle_deg = np.where(angle_deg > 180, 360.0 - angle_deg, angle_deg)
+    # Applies to both vertical (hip/shoulder abduction) and horizontal (trunk extension)
+    angle_deg = np.where(angle_deg > 180, 360.0 - angle_deg, angle_deg)
         
     return angle_deg
 
