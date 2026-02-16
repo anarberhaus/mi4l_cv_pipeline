@@ -181,36 +181,59 @@ def compute_hip_abduction_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
 def compute_bilateral_leg_straddle_angle(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     """
     POSE 4 - Bilateral Leg Straddle
-    Relative-Segment: Internal angle between left and right leg vectors.
+    
+    Computes the internal leg separation angle using pure triangle geometry.
+    
+    Method:
+        pelvis_center = midpoint(left_hip, right_hip)
+        L_left  = distance(left_ankle, pelvis_center)
+        L_right = distance(right_ankle, pelvis_center)
+        L = average(L_left, L_right)
+        D = distance(left_ankle, right_ankle)
+        
+        θ = 2 * arcsin(D / (2L))
+    
+    This produces the INTERNAL leg separation angle without vector ambiguity.
     """
+
     def _xy(prefix: str) -> np.ndarray:
         x = landmarks_df.get(f"{prefix}_x")
         y = landmarks_df.get(f"{prefix}_y")
         if x is None or y is None:
             return np.full((len(landmarks_df), 2), np.nan, dtype=np.float32)
-        return np.column_stack([x.to_numpy(dtype=np.float32), y.to_numpy(dtype=np.float32)])
+        return np.column_stack([x.to_numpy(dtype=np.float32),
+                                y.to_numpy(dtype=np.float32)])
 
     l_hip = _xy("left_hip")
     r_hip = _xy("right_hip")
     l_ank = _xy("left_ankle")
     r_ank = _xy("right_ankle")
 
-    # Legs vectors: Hip -> Ankle
-    v_left = l_ank - l_hip
-    v_right = r_ank - r_hip
-
-    dot = np.einsum("ij,ij->i", v_left, v_right)
-    nm_l = np.linalg.norm(v_left, axis=1)
-    nm_r = np.linalg.norm(v_right, axis=1)
-    denom = nm_l * nm_r
-
+    # Pelvis center is the vertex of the triangle
+    pelvis_center = (l_hip + r_hip) / 2.0
+    
+    # Compute distances
+    # L_left: pelvis center to left ankle
+    # L_right: pelvis center to right ankle
+    # D: left ankle to right ankle
+    L_left = np.linalg.norm(l_ank - pelvis_center, axis=1)
+    L_right = np.linalg.norm(r_ank - pelvis_center, axis=1)
+    L = (L_left + L_right) / 2.0
+    
+    D = np.linalg.norm(l_ank - r_ank, axis=1)
+    
+    # Compute angle using triangle geometry: θ = 2 * arcsin(D / (2L))
     with np.errstate(invalid="ignore", divide="ignore"):
-        cosang = dot / denom
+        ratio = D / (2.0 * L)
     
-    cosang = np.clip(cosang, -1.0, 1.0)
-    ang = np.degrees(np.arccos(cosang))
+    # Clip ratio to valid range for arcsin
+    ratio = np.clip(ratio, -1.0, 1.0)
     
-    invalid = (denom <= 0) | np.isnan(denom)
+    # Compute angle
+    ang = 2.0 * np.degrees(np.arcsin(ratio))
+    
+    # Mark invalid where L is zero or invalid
+    invalid = (L <= 0) | np.isnan(L) | np.isnan(D)
     ang[invalid] = np.nan
 
     out = pd.DataFrame(
@@ -220,6 +243,7 @@ def compute_bilateral_leg_straddle_angle(landmarks_df: pd.DataFrame) -> pd.DataF
             "bilateral_leg_straddle_deg": ang,
         }
     )
+
     return out
 
 

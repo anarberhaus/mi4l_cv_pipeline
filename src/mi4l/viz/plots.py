@@ -59,12 +59,15 @@ def plot_knee_angles(
             label = col.replace("_deg", "").replace("_", " ").title()
             plt.plot(t, angles_df[col].to_numpy(dtype=float), label=label, color=single_color, linewidth=lw)
 
-    # Shade robust frames if provided (expects dict with 'left'/'right' list of indices into angles_df)
+    # Shade robust frames if provided (expects dict with 'left'/'right'/'bilateral'/'both' list of indices into angles_df)
     if robust_frames is not None and isinstance(robust_frames, dict):
         for side_key, idxs in robust_frames.items():
+            # For bilateral poses, side_key might be 'bilateral' or 'both'
             # Only shade if this side is being plotted
-            if side is not None and side_key != side:
-                continue
+            if side is not None:
+                # If plotting a specific side, only shade that side's frames
+                if side_key not in [side, "bilateral", "both"]:
+                    continue
             if not idxs:
                 continue
             # Map indices to times

@@ -84,15 +84,27 @@ def save_snapshot(
             else:
                  mode = "internal"
         elif "pelvis" in b_name:
-            mode = "internal"
+            # Bilateral leg straddle: pelvis center with both ankles
+            if "ankle" in a_name and "ankle" in c_name:
+                mode = "bilateral"
+            else:
+                mode = "internal"
         else:
             mode = "internal"
 
     # Draw points based on mode
     # For orientation modes (vertical/horizontal), only draw B and C
-    # For internal mode, draw A, B, C
+    # For internal/bilateral modes, draw A, B, C
     if mode in ["vertical", "horizontal"]:
         # Orientation-based: only show pivot (B) and endpoint (C)
+        if B is not None:
+            cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
+        if C is not None:
+            cv2.circle(frame, C, radius=6, color=(0, 200, 0), thickness=-1)
+    elif mode == "bilateral":
+        # Bilateral: show pelvis center (B) and both ankles (A, C)
+        if A is not None:
+            cv2.circle(frame, A, radius=6, color=(0, 200, 0), thickness=-1)
         if B is not None:
             cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
         if C is not None:
@@ -234,7 +246,34 @@ def save_snapshot(
                 
                 draw_arc = True
             
-        # 2. Internal Angle Mode
+        # 2. Bilateral Leg Straddle Mode
+        elif mode == "bilateral":
+            if A is not None and C is not None:
+                # Draw two leg vectors from pelvis center (B) to ankles (A, C)
+                cv2.line(frame, B, A, (0, 200, 0), thickness=4)
+                cv2.line(frame, B, C, (0, 200, 0), thickness=4)
+                
+                # Calculate angle between the two leg vectors
+                bax = A[0] - B[0]
+                bay = A[1] - B[1]
+                bcx = C[0] - B[0]
+                bcy = C[1] - B[1]
+                
+                start_angle = math.degrees(math.atan2(bay, bax))
+                end_angle = math.degrees(math.atan2(bcy, bcx))
+                
+                # Normalize and ensure we draw the internal angle
+                start_angle = start_angle % 360
+                end_angle = end_angle % 360
+                diff = (end_angle - start_angle) % 360
+                if diff > 180:
+                    start_angle, end_angle = end_angle, start_angle
+                if end_angle < start_angle:
+                    end_angle += 360
+                    
+                draw_arc = True
+        
+        # 3. Internal Angle Mode
         elif mode == "internal":
             if A is not None:
                 cv2.line(frame, A, B, (0, 200, 0), thickness=4)
@@ -277,9 +316,12 @@ def save_snapshot(
     if angle_deg is not None and B is not None:
         txt = f"{float(angle_deg):.1f} deg"
         
-        # Position text to the right and slightly below the arc
-        # Calculate a position that's offset from B in a clear area
-        if C is not None:
+        # Position text based on mode
+        if mode == "bilateral":
+            # For bilateral straddle, position text above pelvis center
+            text_x = B[0] - 40
+            text_y = B[1] - 80  # Above the pelvis
+        elif C is not None:
             # Position text along the bisector of the angle, outside the arc
             bcx = C[0] - B[0]
             bcy = C[1] - B[1]
@@ -305,7 +347,14 @@ def save_snapshot(
             text_y = B[1] + 20
             
         pos = (text_x, text_y)
-        cv2.putText(frame, txt, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+        
+        # Draw text with black outline for better visibility
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.9
+        # Black outline (thicker)
+        cv2.putText(frame, txt, pos, font, font_scale, (0, 0, 0), 4, cv2.LINE_AA)
+        # White text on top
+        cv2.putText(frame, txt, pos, font, font_scale, (255, 255, 255), 2, cv2.LINE_AA)
 
     cv2.imwrite(str(p), frame)
     cap.release()

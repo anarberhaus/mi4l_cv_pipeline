@@ -108,17 +108,31 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     left_col = _find_side_series("left")
     right_col = _find_side_series("right")
 
+    # Detect bilateral poses (single non-sided column)
+    deg_cols = [c for c in angles_df.columns if c.endswith("_deg")]
+    is_bilateral = (
+        len(deg_cols) == 1 and 
+        not deg_cols[0].startswith("left_") and 
+        not deg_cols[0].startswith("right_")
+    )
+    bilateral_col = deg_cols[0] if is_bilateral else None
+
     # default masks
     left_deriv_ok = pd.Series(True, index=angles_df.index)
     right_deriv_ok = pd.Series(True, index=angles_df.index)
+    bilateral_deriv_ok = pd.Series(True, index=angles_df.index)
 
     if left_col is not None:
         left_deriv_ok = apply_derivative_qc(time_sec=angles_df["time_sec"], angle_deg=angles_df[left_col], max_deg_per_sec=max_dps)
     if right_col is not None:
         right_deriv_ok = apply_derivative_qc(time_sec=angles_df["time_sec"], angle_deg=angles_df[right_col], max_deg_per_sec=max_dps)
+    if bilateral_col is not None:
+        bilateral_deriv_ok = apply_derivative_qc(time_sec=angles_df["time_sec"], angle_deg=angles_df[bilateral_col], max_deg_per_sec=max_dps)
 
     left_valid = base_left_valid & left_deriv_ok
     right_valid = base_right_valid & right_deriv_ok
+    # For bilateral, use combined visibility from both sides
+    bilateral_valid = (base_left_valid | base_right_valid) & bilateral_deriv_ok
 
     # Attach QC columns to angles (keep existing knee-named visibility fields)
     angles_df = angles_df.copy()
@@ -137,26 +151,25 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     robust_cfg = cfg.get("robust_max", {}) or {}
     qc_cfg = cfg.get("qc", {}) or {}
 
-    def _compute_est_for_col(col_name):
+    def _compute_est_for_col(col_name, valid_mask=None):
         if col_name is None or col_name not in angles_df.columns:
             return None
-        # valid mask: prefer a matching "*_valid" column if present
-        base = col_name.rsplit("_", 2)[0]
-        valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
+        # Use provided valid_mask or try to find one
+        if valid_mask is None:
+            base = col_name.rsplit("_", 2)[0]
+            valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
         return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg)
 
-    # Only compute estimates for active sides
-    left_est = _compute_est_for_col(left_col) if "left" in active_sides else None
-    right_est = _compute_est_for_col(right_col) if "right" in active_sides else None
-    
-    # If single column logic was used in original code (not strictly needed if we trust _find_side_series)
-    # But let's keep the fallback logical consistency if strictly one side was requested but only generic column exists.
-    # The original code had a fallback for single column.
-    if left_col is None and right_col is None:
-        # Fallback: maybe the function returns just 'angle_deg'?
-        # In that case, we might assign it to both if active. 
-        # But for now, assume side-specific columns exist or _find_side_series found them.
-        pass
+    # Compute estimates based on pose type
+    if is_bilateral:
+        bilateral_est = _compute_est_for_col(bilateral_col, bilateral_valid)
+        left_est = None
+        right_est = None
+    else:
+        # Only compute estimates for active sides
+        left_est = _compute_est_for_col(left_col) if "left" in active_sides else None
+        right_est = _compute_est_for_col(right_col) if "right" in active_sides else None
+        bilateral_est = None
 
     # 6) Video-level QC flags
     video_flags = compute_video_level_qc_flags(
@@ -171,15 +184,21 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         # build robust_frames mapping from estimated frames_used (if available)
         robust_frames = {}
         try:
-            robust_frames_left = list(getattr(left_est, "frames_used", []) or []) if left_est else []
-            robust_frames_right = list(getattr(right_est, "frames_used", []) or []) if right_est else []
-            robust_frames = {"left": robust_frames_left, "right": robust_frames_right}
+            if is_bilateral:
+                robust_frames_bilateral = list(getattr(bilateral_est, "frames_used", []) or []) if bilateral_est else []
+                robust_frames = {"bilateral": robust_frames_bilateral}
+            else:
+                robust_frames_left = list(getattr(left_est, "frames_used", []) or []) if left_est else []
+                robust_frames_right = list(getattr(right_est, "frames_used", []) or []) if right_est else []
+                robust_frames = {"left": robust_frames_left, "right": robust_frames_right}
         except Exception:
             robust_frames = None
 
-        # Determine which side to plot (for unilateral movements)
+        # Determine which side to plot
         plot_side = None
-        if len(active_sides) == 1:
+        if is_bilateral:
+            plot_side = "both"  # Bilateral poses plot as single series
+        elif len(active_sides) == 1:
             plot_side = active_sides[0]
         
         plot_knee_angles(
@@ -196,6 +215,76 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     if save_snaps:
         snap_dir = out_dir / "snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
+
+        def _save_bilateral_snapshot(est):
+            """Save snapshot for bilateral pose."""
+            if est is None:
+                return
+            
+            # Get metric base name from bilateral column
+            metric_base = bilateral_col.replace("_deg", "") if bilateral_col else "bilateral"
+            
+            # Find frame to snapshot: use frames_used logic similar to side snapshot
+            frames_used = list(getattr(est, "frames_used", []) or [])
+            if not frames_used:
+                return
+            
+            # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
+            frames_used = sorted(list(frames_used))
+            clusters = []
+            if frames_used:
+                current_cluster = [frames_used[0]]
+                for f in frames_used[1:]:
+                    if f - current_cluster[-1] > 10:
+                        clusters.append(current_cluster)
+                        current_cluster = [f]
+                    else:
+                        current_cluster.append(f)
+                clusters.append(current_cluster)
+            
+            # Pick largest cluster
+            if not clusters:
+                return
+            largest_cluster = max(clusters, key=len)
+            
+            # Pick median of the largest cluster
+            try:
+                frame_idx = int(np.median(np.array(largest_cluster, dtype=float)))
+            except Exception:
+                frame_idx = int(largest_cluster[len(largest_cluster) // 2])
+            
+            # Get landmarks for this frame
+            lm_row = landmarks_df[landmarks_df["frame_idx"] == frame_idx]
+            if lm_row.empty:
+                # Fallback: check closest
+                return
+            lm_row = lm_row.iloc[0].to_dict()
+            
+            # Compute pelvis center (midpoint of hips) for bilateral straddle
+            try:
+                lhipx = lm_row.get("left_hip_x")
+                lhipy = lm_row.get("left_hip_y")
+                rhipx = lm_row.get("right_hip_x")
+                rhipy = lm_row.get("right_hip_y")
+                if None not in (lhipx, lhipy, rhipx, rhipy):
+                    lm_row["pelvis_center_x"] = (float(lhipx) + float(rhipx)) / 2.0
+                    lm_row["pelvis_center_y"] = (float(lhipy) + float(rhipy)) / 2.0
+            except Exception:
+                pass
+            
+            # Snapshot configuration for bilateral straddle
+            # Show the angle between pelvis center to each ankle (triangle geometry)
+            a_name = "left_ankle"
+            b_name = "pelvis_center"
+            c_name = "right_ankle"
+            
+            # Output filename
+            fname = f"{metric_base}_both_{kind}_max.png"
+            out_path = snap_dir / fname
+            
+            # Angle value to show
+            ang_val = getattr(est, "value_deg", None)
+            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val)
 
         def _save_side_snapshot(side: str, est):
             if est is None: 
@@ -352,10 +441,14 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
             ang_val = getattr(est, "value_deg", None)
             save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val)
 
-        if "left" in active_sides:
-            _save_side_snapshot("left", left_est)
-        if "right" in active_sides:
-            _save_side_snapshot("right", right_est)
+        # Call appropriate snapshot function based on pose type
+        if is_bilateral:
+            _save_bilateral_snapshot(bilateral_est)
+        else:
+            if "left" in active_sides:
+                _save_side_snapshot("left", left_est)
+            if "right" in active_sides:
+                _save_side_snapshot("right", right_est)
 
     return {
         "landmarks_df": landmarks_df,
@@ -363,6 +456,8 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         "meta": meta,
         "left": left_est,
         "right": right_est,
+        "bilateral": bilateral_est,
+        "is_bilateral": is_bilateral,
         "video_flags": video_flags,
     }
 
@@ -397,31 +492,65 @@ def main(argv: list[str] | None = None) -> int:
     # 7) MI4L (knee only)
     rows: list[dict] = []
     
-    for side in active_sides:
-        arom_est = arom_res[side]
-        prom_est = prom_res[side]
+    # Handle bilateral vs sided poses differently
+    if arom_res.get("is_bilateral", False):
+        # Bilateral pose: single summary row
+        arom_est = arom_res.get("bilateral")
+        prom_est = prom_res.get("bilateral")
+        
+        if arom_est is not None and prom_est is not None:
+            mi4l_res = compute_mi4l(
+                arom_deg=arom_est.value_deg,
+                prom_deg=prom_est.value_deg,
+                prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
+                prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
+                invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
+            )
+            
+            qc_flags = []
+            qc_flags.extend(arom_res.get("video_flags", []))
+            qc_flags.extend(prom_res.get("video_flags", []))
+            qc_flags.extend([f"arom:{f}" for f in arom_est.flags])
+            qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
+            qc_flags.extend([f"mi4l:{f}" for f in mi4l_res.flags])
+            
+            rows.append({
+                "joint": args.pose,
+                "side": "both",
+                "arom_deg": arom_est.value_deg,
+                "prom_deg": prom_est.value_deg,
+                "mi4l": mi4l_res.value,
+                "arom_confidence": arom_est.confidence,
+                "prom_confidence": prom_est.confidence,
+                "mi4l_valid": mi4l_res.valid,
+                "qc_flags": ";".join(sorted(set(qc_flags))),
+            })
+    else:
+        # Sided pose: iterate over active sides
+        for side in active_sides:
+            arom_est = arom_res[side]
+            prom_est = prom_res[side]
 
-        # If estimation failed or didn't run, handle gracefully
-        if arom_est is None or prom_est is None:
-            continue
+            # If estimation failed or didn't run, handle gracefully
+            if arom_est is None or prom_est is None:
+                continue
 
-        mi4l_res = compute_mi4l(
-            arom_deg=arom_est.value_deg,
-            prom_deg=prom_est.value_deg,
-            prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
-            prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
-            invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
-        )
+            mi4l_res = compute_mi4l(
+                arom_deg=arom_est.value_deg,
+                prom_deg=prom_est.value_deg,
+                prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
+                prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
+                invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
+            )
 
-        qc_flags = []
-        qc_flags.extend(arom_res.get("video_flags", []))
-        qc_flags.extend(prom_res.get("video_flags", []))
-        qc_flags.extend([f"arom:{f}" for f in arom_est.flags])
-        qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
-        qc_flags.extend([f"mi4l:{f}" for f in mi4l_res.flags])
+            qc_flags = []
+            qc_flags.extend(arom_res.get("video_flags", []))
+            qc_flags.extend(prom_res.get("video_flags", []))
+            qc_flags.extend([f"arom:{f}" for f in arom_est.flags])
+            qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
+            qc_flags.extend([f"mi4l:{f}" for f in mi4l_res.flags])
 
-        rows.append(
-            {
+            rows.append({
                 "joint": args.pose,
                 "side": side,
                 "arom_deg": arom_est.value_deg,
@@ -431,8 +560,7 @@ def main(argv: list[str] | None = None) -> int:
                 "prom_confidence": prom_est.confidence,
                 "mi4l_valid": mi4l_res.valid,
                 "qc_flags": ";".join(sorted(set(qc_flags))),
-            }
-        )
+            })
 
     summary_df = pd.DataFrame(rows)
     if cfg.get("export", {}).get("save_summary_csv", True):
