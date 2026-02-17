@@ -273,7 +273,7 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 pass
             
             # Snapshot configuration for bilateral straddle
-            # Show the angle between pelvis center to each ankle (triangle geometry)
+            # Show pelvis center to each ankle (matching the angle calculation)
             a_name = "left_ankle"
             b_name = "pelvis_center"
             c_name = "right_ankle"

@@ -182,18 +182,21 @@ def compute_bilateral_leg_straddle_angle(landmarks_df: pd.DataFrame) -> pd.DataF
     """
     POSE 4 - Bilateral Leg Straddle
     
-    Computes the internal leg separation angle using pure triangle geometry.
+    Computes the internal leg separation angle using angular positions in the
+    image plane, corrected for video aspect ratio.
+    
+    MediaPipe landmarks are stored as normalized (0-1) coordinates.
+    A 16:9 video has x range 0-1 mapping to 1920px and y range 0-1 mapping
+    to 1080px. Without correction, horizontal spread is underweighted,
+    making angles appear smaller than they are.
     
     Method:
-        pelvis_center = midpoint(left_hip, right_hip)
-        L_left  = distance(left_ankle, pelvis_center)
-        L_right = distance(right_ankle, pelvis_center)
-        L = average(L_left, L_right)
-        D = distance(left_ankle, right_ankle)
-        
-        θ = 2 * arcsin(D / (2L))
-    
-    This produces the INTERNAL leg separation angle without vector ambiguity.
+        1. pelvis_center = midpoint(left_hip, right_hip)
+        2. Scale x-coordinates by (image_w / image_h) to correct aspect ratio
+        3. angle_to_left = atan2(dy_left, dx_left_scaled)
+        4. angle_to_right = atan2(dy_right, dx_right_scaled)
+        5. separation = abs(angle_right - angle_left)
+        6. if separation > 180°: separation = 360° - separation
     """
 
     def _xy(prefix: str) -> np.ndarray:
@@ -209,38 +212,46 @@ def compute_bilateral_leg_straddle_angle(landmarks_df: pd.DataFrame) -> pd.DataF
     l_ank = _xy("left_ankle")
     r_ank = _xy("right_ankle")
 
-    # Pelvis center is the vertex of the triangle
+    # Aspect ratio correction: scale x so that x and y represent equal physical distances
+    # MediaPipe stores normalized coords (0-1), so x=0.1 and y=0.1 span different pixel counts
+    image_w = landmarks_df.get("image_w")
+    image_h = landmarks_df.get("image_h")
+    if image_w is not None and image_h is not None:
+        aspect = (image_w.to_numpy(dtype=np.float32) / image_h.to_numpy(dtype=np.float32))
+    else:
+        aspect = np.ones(len(landmarks_df), dtype=np.float32)
+
+    # Pelvis center is the reference point
     pelvis_center = (l_hip + r_hip) / 2.0
     
-    # Compute distances
-    # L_left: pelvis center to left ankle
-    # L_right: pelvis center to right ankle
-    # D: left ankle to right ankle
-    L_left = np.linalg.norm(l_ank - pelvis_center, axis=1)
-    L_right = np.linalg.norm(r_ank - pelvis_center, axis=1)
-    L = (L_left + L_right) / 2.0
+    # Compute deltas from pelvis center to each ankle
+    dx_left = (l_ank[:, 0] - pelvis_center[:, 0]) * aspect   # scale x by aspect ratio
+    dy_left = l_ank[:, 1] - pelvis_center[:, 1]               # y stays as-is
+    angle_to_left = np.arctan2(dy_left, dx_left)
     
-    D = np.linalg.norm(l_ank - r_ank, axis=1)
+    dx_right = (r_ank[:, 0] - pelvis_center[:, 0]) * aspect   # scale x by aspect ratio
+    dy_right = r_ank[:, 1] - pelvis_center[:, 1]               # y stays as-is
+    angle_to_right = np.arctan2(dy_right, dx_right)
     
-    # Compute angle using triangle geometry: θ = 2 * arcsin(D / (2L))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        ratio = D / (2.0 * L)
+    # Convert to degrees
+    angle_to_left_deg = np.degrees(angle_to_left)
+    angle_to_right_deg = np.degrees(angle_to_right)
     
-    # Clip ratio to valid range for arcsin
-    ratio = np.clip(ratio, -1.0, 1.0)
+    # Compute angular separation (always positive)
+    separation = np.abs(angle_to_right_deg - angle_to_left_deg)
     
-    # Compute angle
-    ang = 2.0 * np.degrees(np.arcsin(ratio))
+    # If separation > 180°, take the complementary angle
+    separation = np.where(separation > 180, 360 - separation, separation)
     
-    # Mark invalid where L is zero or invalid
-    invalid = (L <= 0) | np.isnan(L) | np.isnan(D)
-    ang[invalid] = np.nan
+    # Mark invalid where inputs are NaN
+    invalid = np.isnan(dx_left) | np.isnan(dy_left) | np.isnan(dx_right) | np.isnan(dy_right)
+    separation[invalid] = np.nan
 
     out = pd.DataFrame(
         {
             "frame_idx": landmarks_df["frame_idx"].to_numpy(dtype=int),
             "time_sec": landmarks_df["time_sec"].to_numpy(dtype=float),
-            "bilateral_leg_straddle_deg": ang,
+            "bilateral_leg_straddle_deg": separation,
         }
     )
 
