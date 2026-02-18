@@ -22,7 +22,7 @@ from mi4l.io.export import (
     save_landmarks_csv,
     save_summary_csv,
 )
-from mi4l.metrics.arom_prom import estimate_robust_max
+from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau
 from mi4l.metrics.mi4l import compute_mi4l
 from mi4l.pose.mediapipe_pose import extract_mediapipe_pose_landmarks
 from mi4l.qc.qc_rules import (
@@ -50,7 +50,7 @@ POSE_TO_METRIC_FN = {
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute MI4L (Milestone 1: knee only) from paired AROM/PROM videos.")
     p.add_argument("--arom", required=True, type=str, help="Path to AROM video (mp4).")
-    p.add_argument("--prom", required=True, type=str, help="Path to PROM video (mp4).")
+    p.add_argument("--prom", required=False, type=str, help="Path to PROM video (mp4, optional).")
     p.add_argument("--out", required=True, type=str, help="Output folder (e.g., results/run_001/).")
     p.add_argument("--pose", required=True, type=str, help="Pose name (maps to metric function).")
     p.add_argument("--config", required=True, type=str, help="Path to YAML config (e.g., configs/default.yaml).")
@@ -108,14 +108,14 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     left_col = _find_side_series("left")
     right_col = _find_side_series("right")
 
-    # Detect bilateral poses (single non-sided column)
-    deg_cols = [c for c in angles_df.columns if c.endswith("_deg")]
+    # Detect bilateral/standard poses (single non-sided column)
+    target_cols = [c for c in angles_df.columns if c.endswith("_deg") or c.endswith("_dist_norm")]
     is_bilateral = (
-        len(deg_cols) == 1 and 
-        not deg_cols[0].startswith("left_") and 
-        not deg_cols[0].startswith("right_")
+        len(target_cols) == 1 and 
+        not target_cols[0].startswith("left_") and 
+        not target_cols[0].startswith("right_")
     )
-    bilateral_col = deg_cols[0] if is_bilateral else None
+    bilateral_col = target_cols[0] if is_bilateral else None
 
     # default masks
     left_deriv_ok = pd.Series(True, index=angles_df.index)
@@ -158,7 +158,19 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         if valid_mask is None:
             base = col_name.rsplit("_", 2)[0]
             valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
-        return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg)
+        # Distance metrics (e.g. stick pass-through) use stable plateau detection
+        if col_name.endswith("_dist_norm"):
+            plateau_cfg = cfg.get("stable_plateau", {}) or {}
+            return estimate_stable_plateau(
+                series=angles_df[col_name],
+                valid_mask=valid_mask,
+                smoothing_cfg=smooth_cfg,
+                plateau_cfg=plateau_cfg,
+                qc_cfg=qc_cfg,
+            )
+        # Angle metrics use topk robust max/min
+        direction = "max"
+        return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg, direction=direction)
 
     # Compute estimates based on pose type
     if is_bilateral:
@@ -221,8 +233,8 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
             if est is None:
                 return
             
-            # Get metric base name from bilateral column
-            metric_base = bilateral_col.replace("_deg", "") if bilateral_col else "bilateral"
+            # Get metric base name from bilateral column (strip _deg or _dist_norm)
+            metric_base = bilateral_col.replace("_deg", "").replace("_dist_norm", "") if bilateral_col else "bilateral"
             
             # Find frame to snapshot: use frames_used logic similar to side snapshot
             frames_used = list(getattr(est, "frames_used", []) or [])
@@ -256,35 +268,51 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
             # Get landmarks for this frame
             lm_row = landmarks_df[landmarks_df["frame_idx"] == frame_idx]
             if lm_row.empty:
-                # Fallback: check closest
                 return
             lm_row = lm_row.iloc[0].to_dict()
             
-            # Compute pelvis center (midpoint of hips) for bilateral straddle
-            try:
-                lhipx = lm_row.get("left_hip_x")
-                lhipy = lm_row.get("left_hip_y")
-                rhipx = lm_row.get("right_hip_x")
-                rhipy = lm_row.get("right_hip_y")
-                if None not in (lhipx, lhipy, rhipx, rhipy):
-                    lm_row["pelvis_center_x"] = (float(lhipx) + float(rhipx)) / 2.0
-                    lm_row["pelvis_center_y"] = (float(lhipy) + float(rhipy)) / 2.0
-            except Exception:
-                pass
-            
-            # Snapshot configuration for bilateral straddle
-            # Show pelvis center to each ankle (matching the angle calculation)
-            a_name = "left_ankle"
-            b_name = "pelvis_center"
-            c_name = "right_ankle"
+            # Dispatch landmark selection and snapshot mode based on pose
+            if pose_name == "shoulder_stick_pass_through":
+                # Show left_wrist -> right_wrist with shoulder midpoint as reference
+                # Compute shoulder midpoint for context
+                try:
+                    lshx = lm_row.get("left_shoulder_x")
+                    lshy = lm_row.get("left_shoulder_y")
+                    rshx = lm_row.get("right_shoulder_x")
+                    rshy = lm_row.get("right_shoulder_y")
+                    if None not in (lshx, lshy, rshx, rshy):
+                        lm_row["shoulder_midpoint_x"] = (float(lshx) + float(rshx)) / 2.0
+                        lm_row["shoulder_midpoint_y"] = (float(lshy) + float(rshy)) / 2.0
+                except Exception:
+                    pass
+                a_name = "left_wrist"
+                b_name = "right_wrist"
+                c_name = None
+                snap_mode = "distance"
+            else:
+                # Default bilateral straddle: pelvis center to each ankle
+                try:
+                    lhipx = lm_row.get("left_hip_x")
+                    lhipy = lm_row.get("left_hip_y")
+                    rhipx = lm_row.get("right_hip_x")
+                    rhipy = lm_row.get("right_hip_y")
+                    if None not in (lhipx, lhipy, rhipx, rhipy):
+                        lm_row["pelvis_center_x"] = (float(lhipx) + float(rhipx)) / 2.0
+                        lm_row["pelvis_center_y"] = (float(lhipy) + float(rhipy)) / 2.0
+                except Exception:
+                    pass
+                a_name = "left_ankle"
+                b_name = "pelvis_center"
+                c_name = "right_ankle"
+                snap_mode = "auto"
             
             # Output filename
             fname = f"{metric_base}_both_{kind}_max.png"
             out_path = snap_dir / fname
             
-            # Angle value to show
+            # Value to show
             ang_val = getattr(est, "value_deg", None)
-            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val)
+            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode)
 
         def _save_side_snapshot(side: str, est):
             if est is None: 
@@ -473,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         save_config_used(cfg, out_dir / "config_used.yaml")
 
     arom_path = Path(args.arom)
-    prom_path = Path(args.prom)
+    prom_path = Path(args.prom) if args.prom else None
 
     mi4l_cfg = cfg.get("mi4l", {}) or {}
     mode_side = str(mi4l_cfg.get("side", "both")).lower().strip()
@@ -487,7 +515,10 @@ def main(argv: list[str] | None = None) -> int:
         active_sides = ["left", "right"]
 
     arom_res = _process_one_video("arom", arom_path, out_dir, cfg, active_sides=active_sides, pose_name=args.pose)
-    prom_res = _process_one_video("prom", prom_path, out_dir, cfg, active_sides=active_sides, pose_name=args.pose)
+    
+    prom_res = None
+    if prom_path:
+        prom_res = _process_one_video("prom", prom_path, out_dir, cfg, active_sides=active_sides, pose_name=args.pose)
 
     # 7) MI4L (knee only)
     rows: list[dict] = []
@@ -496,69 +527,89 @@ def main(argv: list[str] | None = None) -> int:
     if arom_res.get("is_bilateral", False):
         # Bilateral pose: single summary row
         arom_est = arom_res.get("bilateral")
-        prom_est = prom_res.get("bilateral")
+        prom_est = prom_res.get("bilateral") if prom_res else None
         
-        if arom_est is not None and prom_est is not None:
-            mi4l_res = compute_mi4l(
-                arom_deg=arom_est.value_deg,
-                prom_deg=prom_est.value_deg,
-                prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
-                prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
-                invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
-            )
+        if arom_est is not None:
+            mi4l_val = None
+            mi4l_valid = False
+            mi4l_flags = []
+            
+            if prom_est is not None:
+                mi4l_res = compute_mi4l(
+                    arom_deg=arom_est.value_deg,
+                    prom_deg=prom_est.value_deg,
+                    prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
+                    prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
+                    invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
+                )
+                mi4l_val = mi4l_res.value
+                mi4l_valid = mi4l_res.valid
+                mi4l_flags = mi4l_res.flags
             
             qc_flags = []
             qc_flags.extend(arom_res.get("video_flags", []))
-            qc_flags.extend(prom_res.get("video_flags", []))
+            if prom_res:
+                qc_flags.extend(prom_res.get("video_flags", []))
             qc_flags.extend([f"arom:{f}" for f in arom_est.flags])
-            qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
-            qc_flags.extend([f"mi4l:{f}" for f in mi4l_res.flags])
+            if prom_est:
+                qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
+            qc_flags.extend([f"mi4l:{f}" for f in mi4l_flags])
             
             rows.append({
                 "joint": args.pose,
                 "side": "both",
                 "arom_deg": arom_est.value_deg,
-                "prom_deg": prom_est.value_deg,
-                "mi4l": mi4l_res.value,
+                "prom_deg": prom_est.value_deg if prom_est else None,
+                "mi4l": mi4l_val,
                 "arom_confidence": arom_est.confidence,
-                "prom_confidence": prom_est.confidence,
-                "mi4l_valid": mi4l_res.valid,
+                "prom_confidence": prom_est.confidence if prom_est else None,
+                "mi4l_valid": mi4l_valid,
                 "qc_flags": ";".join(sorted(set(qc_flags))),
             })
     else:
         # Sided pose: iterate over active sides
         for side in active_sides:
             arom_est = arom_res[side]
-            prom_est = prom_res[side]
+            prom_est = prom_res[side] if prom_res else None
 
             # If estimation failed or didn't run, handle gracefully
-            if arom_est is None or prom_est is None:
+            if arom_est is None:
                 continue
 
-            mi4l_res = compute_mi4l(
-                arom_deg=arom_est.value_deg,
-                prom_deg=prom_est.value_deg,
-                prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
-                prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
-                invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
-            )
+            mi4l_val = None
+            mi4l_valid = False
+            mi4l_flags = []
+
+            if prom_est is not None:
+                mi4l_res = compute_mi4l(
+                    arom_deg=arom_est.value_deg,
+                    prom_deg=prom_est.value_deg,
+                    prom_min_deg=float(mi4l_cfg.get("prom_min_deg", 1.0)),
+                    prom_lt_arom_tolerance_deg=float(mi4l_cfg.get("prom_lt_arom_tolerance_deg", 2.0)),
+                    invalidate_if_prom_lt_arom=bool(mi4l_cfg.get("invalidate_if_prom_lt_arom", True)),
+                )
+                mi4l_val = mi4l_res.value
+                mi4l_valid = mi4l_res.valid
+                mi4l_flags = mi4l_res.flags
 
             qc_flags = []
             qc_flags.extend(arom_res.get("video_flags", []))
-            qc_flags.extend(prom_res.get("video_flags", []))
+            if prom_res:
+                qc_flags.extend(prom_res.get("video_flags", []))
             qc_flags.extend([f"arom:{f}" for f in arom_est.flags])
-            qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
-            qc_flags.extend([f"mi4l:{f}" for f in mi4l_res.flags])
+            if prom_est:
+                qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
+            qc_flags.extend([f"mi4l:{f}" for f in mi4l_flags])
 
             rows.append({
                 "joint": args.pose,
                 "side": side,
                 "arom_deg": arom_est.value_deg,
-                "prom_deg": prom_est.value_deg,
-                "mi4l": mi4l_res.value,
+                "prom_deg": prom_est.value_deg if prom_est else None,
+                "mi4l": mi4l_val,
                 "arom_confidence": arom_est.confidence,
-                "prom_confidence": prom_est.confidence,
-                "mi4l_valid": mi4l_res.valid,
+                "prom_confidence": prom_est.confidence if prom_est else None,
+                "mi4l_valid": mi4l_valid,
                 "qc_flags": ";".join(sorted(set(qc_flags))),
             })
 

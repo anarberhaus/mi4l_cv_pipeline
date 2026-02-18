@@ -41,6 +41,12 @@ robust_max:
   min_topk_frames: 5
   min_hold_frames: 15
 
+stable_plateau:
+  stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
+  stability_threshold: 0.15     # max rolling std to be considered "stable"
+  min_value_threshold: 1.2      # minimum normalized value (e.g. 1.2x shoulder width)
+  min_plateau_frames: 10        # minimum frames for a valid plateau
+
 mi4l:
   side: both  # both | left | right
   prom_min_deg: 1.0

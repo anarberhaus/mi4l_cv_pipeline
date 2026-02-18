@@ -85,7 +85,7 @@ def save_snapshot(
                  mode = "internal"
         elif "pelvis" in b_name:
             # Bilateral leg straddle: pelvis center with both ankles
-            if "ankle" in a_name and "ankle" in c_name:
+            if a_name and "ankle" in a_name and c_name and "ankle" in c_name:
                 mode = "bilateral"
             else:
                 mode = "internal"
@@ -109,6 +109,12 @@ def save_snapshot(
             cv2.circle(frame, B, radius=7, color=(0, 0, 255), thickness=-1)
         if C is not None:
             cv2.circle(frame, C, radius=6, color=(0, 200, 0), thickness=-1)
+    elif mode == "distance":
+        # Distance: show both endpoints (A and B = left_wrist and right_wrist)
+        if A is not None:
+            cv2.circle(frame, A, radius=8, color=(0, 200, 0), thickness=-1)
+        if B is not None:
+            cv2.circle(frame, B, radius=8, color=(0, 200, 0), thickness=-1)
     else:
         # Internal angle: show all three points
         if A is not None:
@@ -273,7 +279,20 @@ def save_snapshot(
                     
                 draw_arc = True
         
-        # 3. Internal Angle Mode
+        # 3. Distance Mode (stick pass-through: wrist-to-wrist)
+        elif mode == "distance":
+            if A is not None and B is not None:
+                # Draw wrist-to-wrist line
+                cv2.line(frame, A, B, (0, 200, 0), thickness=4)
+                # Draw shoulder width reference line if available
+                l_sh = _pt("left_shoulder")
+                r_sh = _pt("right_shoulder")
+                if l_sh is not None and r_sh is not None:
+                    cv2.line(frame, l_sh, r_sh, (180, 180, 180), thickness=2, lineType=cv2.LINE_AA)
+                    cv2.circle(frame, l_sh, radius=5, color=(180, 180, 180), thickness=-1)
+                    cv2.circle(frame, r_sh, radius=5, color=(180, 180, 180), thickness=-1)
+        
+        # 4. Internal Angle Mode
         elif mode == "internal":
             if A is not None:
                 cv2.line(frame, A, B, (0, 200, 0), thickness=4)
@@ -312,15 +331,28 @@ def save_snapshot(
             r = 40
             cv2.ellipse(frame, B, (r, r), 0.0, start_angle, end_angle, (255, 200, 0), thickness=3)
 
-    # write angle text - position it next to the arc, not on top of points
+    # write value text - position it next to the arc, not on top of points
     if angle_deg is not None and B is not None:
-        txt = f"{float(angle_deg):.1f} deg"
+        if mode == "distance":
+            txt = f"{float(angle_deg):.2f}x shoulder"
+        else:
+            txt = f"{float(angle_deg):.1f} deg"
         
         # Position text based on mode
         if mode == "bilateral":
             # For bilateral straddle, position text above pelvis center
             text_x = B[0] - 40
             text_y = B[1] - 80  # Above the pelvis
+        elif mode == "distance":
+            # For distance mode, position text above the midpoint of the two wrists
+            if A is not None:
+                mid_x = (A[0] + B[0]) // 2
+                mid_y = min(A[1], B[1]) - 40
+            else:
+                mid_x = B[0]
+                mid_y = B[1] - 40
+            text_x = mid_x - 60
+            text_y = mid_y
         elif C is not None:
             # Position text along the bisector of the angle, outside the arc
             bcx = C[0] - B[0]

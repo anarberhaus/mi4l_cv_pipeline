@@ -29,13 +29,13 @@ def plot_knee_angles(
     single_color = "#2ca02c"  # green for non-sided metrics
     lw = 2.5
 
-    # Auto-detect angle columns (ending with _deg, excluding time_sec)
-    angle_cols = [col for col in angles_df.columns if col.endswith("_deg") and col != "time_sec"]
+    # Auto-detect value columns (ending with _deg or _dist_norm, excluding time_sec)
+    value_cols = [col for col in angles_df.columns if (col.endswith("_deg") or col.endswith("_dist_norm")) and col != "time_sec"]
     
     # Separate into left, right, and non-sided columns
-    left_cols = [col for col in angle_cols if col.startswith("left_")]
-    right_cols = [col for col in angle_cols if col.startswith("right_")]
-    other_cols = [col for col in angle_cols if col not in left_cols and col not in right_cols]
+    left_cols = [col for col in value_cols if col.startswith("left_")]
+    right_cols = [col for col in value_cols if col.startswith("right_")]
+    other_cols = [col for col in value_cols if col not in left_cols and col not in right_cols]
     
     # Determine which sides to plot
     plot_left = (side is None or side == "left") and len(left_cols) > 0
@@ -52,11 +52,11 @@ def plot_knee_angles(
         for col in right_cols:
             plt.plot(t, angles_df[col].to_numpy(dtype=float), label="Right", color=right_color, linewidth=lw)
     
-    # Plot non-sided columns (e.g., trunk_extension_deg)
+    # Plot non-sided columns (e.g., trunk_extension_deg, stick_pass_through_dist_norm)
     if plot_other:
         for col in other_cols:
             # Extract a clean label from column name
-            label = col.replace("_deg", "").replace("_", " ").title()
+            label = col.replace("_deg", "").replace("_dist_norm", "").replace("_", " ").title()
             plt.plot(t, angles_df[col].to_numpy(dtype=float), label=label, color=single_color, linewidth=lw)
 
     # Shade robust frames if provided (expects dict with 'left'/'right'/'bilateral'/'both' list of indices into angles_df)
@@ -81,12 +81,22 @@ def plot_knee_angles(
                 t1 = float(times.max())
                 plt.axvspan(t0, t1, alpha=0.15, color=(0.2, 0.2, 0.2))
 
+    # Detect if we have non-degree units
+    has_dist = any(col.endswith("_dist_norm") for col in value_cols)
+    has_deg = any(col.endswith("_deg") for col in value_cols)
+    
     plt.xlabel("Time (s)")
-    plt.ylabel("Angle (deg)")
+    if has_dist and not has_deg:
+        plt.ylabel("Normalized Distance")
+    elif has_dist and has_deg:
+        plt.ylabel("Value (Deg or Norm)")
+    else:
+        plt.ylabel("Angle (deg)")
+
     plt.title(title)
     
     # Only show legend if plotting multiple series or both sides
-    if (plot_left and plot_right) or len(angle_cols) > 1:
+    if (plot_left and plot_right) or len(value_cols) > 1:
         plt.legend(title="Side" if (plot_left or plot_right) else None)
     
     plt.tight_layout()
