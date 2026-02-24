@@ -423,6 +423,7 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
             a_name = ""
             b_name = ""
             c_name = ""
+            snap_mode = "auto"   # overridden per-pose where needed
             mb = metric_base
             if mb.startswith("knee") or "knee" in mb:
                 # knee_flexion -> hip - knee - ankle
@@ -451,10 +452,11 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 a_name = "shoulder_midpoint"
                 b_name = f"{side}_hip"
                 c_name = f"{side}_knee"
-            elif "shoulder_flexion" in mb or "shoulder" in mb:
+            elif "shoulder_flexion" in mb or ("shoulder" in mb and "stick" not in mb):
                 a_name = "hip_midpoint"
                 b_name = f"{side}_shoulder"
                 c_name = f"{side}_wrist"
+                snap_mode = "internal"
             else:
                 # fallback to left-side hip/knee/ankle
                 a_name = f"{side}_hip"
@@ -467,7 +469,7 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
 
             # angle value to show: use est.value_deg if present
             ang_val = getattr(est, "value_deg", None)
-            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val)
+            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode)
 
         # Call appropriate snapshot function based on pose type
         if is_bilateral:

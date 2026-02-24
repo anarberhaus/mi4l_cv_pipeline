@@ -298,34 +298,41 @@ def compute_hip_extension_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
 def compute_shoulder_flexion_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     """
     POSE 6 - Shoulder Flexion
-    Vector: Wrist - Shoulder (Arm)
-    Reference: Vertical (0=Down)
+    Trunk-relative angle at the shoulder: angle_abc(hip_mid, shoulder, wrist).
+
+    Using hip_midpoint as the proximal trunk reference instead of a global
+    vertical axis makes the measurement body-orientation-independent. This
+    means PROM (e.g. kneeling/bent-over) and AROM (standing) are measured on
+    the same anatomical scale: 0° = arm alongside trunk, 180° = fully raised.
     """
-    def _xy(prefix: str) -> tuple[np.ndarray, np.ndarray]:
+    def _col(prefix: str) -> np.ndarray:
         x = landmarks_df.get(f"{prefix}_x")
         y = landmarks_df.get(f"{prefix}_y")
         if x is None or y is None:
-            nan = np.full(len(landmarks_df), np.nan, dtype=np.float32)
-            return nan, nan
-        return x.to_numpy(dtype=np.float32), y.to_numpy(dtype=np.float32)
+            return np.full((len(landmarks_df), 2), np.nan, dtype=np.float32)
+        return np.column_stack([x.to_numpy(dtype=np.float32),
+                                y.to_numpy(dtype=np.float32)])
 
-    lx_s, ly_s = _xy("left_shoulder")
-    rx_s, ry_s = _xy("right_shoulder")
-    lx_w, ly_w = _xy("left_wrist")
-    rx_w, ry_w = _xy("right_wrist")
+    l_hip = _col("left_hip")
+    r_hip = _col("right_hip")
+    l_sho = _col("left_shoulder")
+    r_sho = _col("right_shoulder")
+    l_wri = _col("left_wrist")
+    r_wri = _col("right_wrist")
 
-    # Vector = Wrist - Shoulder
-    lv_x, lv_y = lx_w - lx_s, ly_w - ly_s
-    rv_x, rv_y = rx_w - rx_s, ry_w - ry_s
+    # Trunk reference: midpoint of both hips
+    hip_mid = (l_hip + r_hip) / 2.0
 
-    left_deg = angle_orientation_deg(lv_x, lv_y, ref_axis="vertical")
-    right_deg = angle_orientation_deg(rv_x, rv_y, ref_axis="vertical")
+    # angle_abc_deg(A=hip_mid, B=shoulder, C=wrist)
+    # → internal angle at B between trunk line and arm line
+    left_deg  = angle_abc_deg(hip_mid, l_sho, l_wri)
+    right_deg = angle_abc_deg(hip_mid, r_sho, r_wri)
 
     out = pd.DataFrame(
         {
             "frame_idx": landmarks_df["frame_idx"].to_numpy(dtype=int),
-            "time_sec": landmarks_df["time_sec"].to_numpy(dtype=float),
-            "left_shoulder_flexion_deg": left_deg,
+            "time_sec":  landmarks_df["time_sec"].to_numpy(dtype=float),
+            "left_shoulder_flexion_deg":  left_deg,
             "right_shoulder_flexion_deg": right_deg,
         }
     )

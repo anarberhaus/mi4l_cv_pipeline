@@ -21,7 +21,9 @@ mi4l_cv_pipeline/
 ├── configs/
 │   └── default.yaml  # Default config (thresholds, params)
 ├── data/             # Local test videos (gitignored)
-└── results/          # Pipeline outputs (gitignored)
+│   ├── arom/         # Recommended folder for AROM videos
+│   └── prom/         # Recommended folder for PROM videos
+├── results/          # Pipeline outputs (gitignored)
 ```
 
 ---
@@ -50,8 +52,8 @@ All runs go through `scripts/run_mi4l.py`.
 
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/arom_video.mp4" \
-  --prom  "data/prom_video.mp4" \
+  --arom  "data/arom/video_name.mp4" \
+  --prom  "data/prom/video_name.mp4" \
   --out   "results/run_001/" \
   --pose  <POSE_NAME> \
   --config configs/default.yaml
@@ -76,8 +78,8 @@ python scripts/run_mi4l.py \
 **Knee flexion (both sides, AROM + PROM):**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/knee_arom.mp4" \
-  --prom  "data/knee_prom.mp4" \
+  --arom  "data/arom/knee_arom.mp4" \
+  --prom  "data/prom/knee_prom.mp4" \
   --out   "results/knee_flexion/" \
   --pose  kneeling_knee_flexion \
   --config configs/default.yaml
@@ -86,7 +88,7 @@ python scripts/run_mi4l.py \
 **Shoulder flexion (AROM only, left side):**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/shoulder_arom.mp4" \
+  --arom  "data/arom/shoulder_arom.mp4" \
   --out   "results/shoulder_flexion/" \
   --pose  shoulder_flexion \
   --config configs/default.yaml
@@ -96,8 +98,8 @@ python scripts/run_mi4l.py \
 **Shoulder stick pass-through:**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/stick_arom.mp4" \
-  --prom  "data/stick_prom.mp4" \
+  --arom  "data/arom/stick_arom.mp4" \
+  --prom  "data/prom/stick_prom.mp4" \
   --out   "results/stick_pass_through/" \
   --pose  shoulder_stick_pass_through \
   --config configs/default.yaml
@@ -106,7 +108,7 @@ python scripts/run_mi4l.py \
 **Hip extension (right side only):**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/hip_ext_arom.mp4" \
+  --arom  "data/arom/hip_ext_arom.mp4" \
   --out   "results/hip_extension/" \
   --pose  unilateral_hip_extension \
   --config configs/default.yaml
