@@ -48,7 +48,7 @@ stable_plateau:
   min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:
-  side: both  # both | left | right
+  side: left  # both | left | right
   prom_min_deg: 1.0
   prom_lt_arom_tolerance_deg: 2.0
   invalidate_if_prom_lt_arom: true
