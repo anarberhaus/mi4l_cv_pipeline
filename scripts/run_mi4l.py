@@ -54,6 +54,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--out", required=True, type=str, help="Output folder (e.g., results/run_001/).")
     p.add_argument("--pose", required=True, type=str, help="Pose name (maps to metric function).")
     p.add_argument("--config", required=True, type=str, help="Path to YAML config (e.g., configs/default.yaml).")
+    p.add_argument("--side", required=False, type=str, choices=["left", "right", "both"],
+                   help="Override mi4l.side from config (left | right | both).")
     return p.parse_args(argv)
 
 
@@ -229,22 +231,21 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         snap_dir.mkdir(parents=True, exist_ok=True)
 
         def _save_bilateral_snapshot(est):
-            """Save snapshot for bilateral pose."""
-            if est is None:
-                return
-            
             # Get metric base name from bilateral column (strip _deg or _dist_norm)
             metric_base = bilateral_col.replace("_deg", "").replace("_dist_norm", "") if bilateral_col else "bilateral"
             
             # Find frame to snapshot: use frames_used logic similar to side snapshot
-            frames_used = list(getattr(est, "frames_used", []) or [])
+            frames_used = list(getattr(est, "frames_used", []) or []) if est else []
             if not frames_used:
-                return
-            
-            # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
-            frames_used = sorted(list(frames_used))
-            clusters = []
-            if frames_used:
+                print(f"DEBUG: No valid frames used for bilateral snapshot. Forcing snapshot at fallback frame.")
+                if len(angles_df) > 0:
+                    frame_idx = int(angles_df.iloc[len(angles_df) // 2]["frame_idx"])
+                else:
+                    return
+            else:
+                # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
+                frames_used = sorted(list(frames_used))
+                clusters = []
                 current_cluster = [frames_used[0]]
                 for f in frames_used[1:]:
                     if f - current_cluster[-1] > 10:
@@ -253,17 +254,15 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                     else:
                         current_cluster.append(f)
                 clusters.append(current_cluster)
-            
-            # Pick largest cluster
-            if not clusters:
-                return
-            largest_cluster = max(clusters, key=len)
-            
-            # Pick median of the largest cluster
-            try:
-                frame_idx = int(np.median(np.array(largest_cluster, dtype=float)))
-            except Exception:
-                frame_idx = int(largest_cluster[len(largest_cluster) // 2])
+                
+                # Pick largest cluster
+                largest_cluster = max(clusters, key=len)
+                
+                # Pick median of the largest cluster
+                try:
+                    frame_idx = int(np.median(np.array(largest_cluster, dtype=float)))
+                except Exception:
+                    frame_idx = int(largest_cluster[len(largest_cluster) // 2])
             
             # Get landmarks for this frame
             lm_row = landmarks_df[landmarks_df["frame_idx"] == frame_idx]
@@ -290,15 +289,27 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 c_name = None
                 snap_mode = "distance"
             else:
-                # Default bilateral straddle: pelvis center to each ankle
+                # Compute ALL midpoints needed by bilateral poses
                 try:
                     lhipx = lm_row.get("left_hip_x")
                     lhipy = lm_row.get("left_hip_y")
                     rhipx = lm_row.get("right_hip_x")
                     rhipy = lm_row.get("right_hip_y")
                     if None not in (lhipx, lhipy, rhipx, rhipy):
-                        lm_row["pelvis_center_x"] = (float(lhipx) + float(rhipx)) / 2.0
-                        lm_row["pelvis_center_y"] = (float(lhipy) + float(rhipy)) / 2.0
+                        lm_row["hip_midpoint_x"]  = (float(lhipx) + float(rhipx)) / 2.0
+                        lm_row["hip_midpoint_y"]  = (float(lhipy) + float(rhipy)) / 2.0
+                        lm_row["pelvis_center_x"] = lm_row["hip_midpoint_x"]
+                        lm_row["pelvis_center_y"] = lm_row["hip_midpoint_y"]
+                except Exception:
+                    pass
+                try:
+                    lshx = lm_row.get("left_shoulder_x")
+                    lshy = lm_row.get("left_shoulder_y")
+                    rshx = lm_row.get("right_shoulder_x")
+                    rshy = lm_row.get("right_shoulder_y")
+                    if None not in (lshx, lshy, rshx, rshy):
+                        lm_row["shoulder_midpoint_x"] = (float(lshx) + float(rshx)) / 2.0
+                        lm_row["shoulder_midpoint_y"] = (float(lshy) + float(rshy)) / 2.0
                 except Exception:
                     pass
                 a_name = "left_ankle"
@@ -312,23 +323,22 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
             
             # Value to show
             ang_val = getattr(est, "value_deg", None)
-            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode)
+            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode, pose_name=pose_name)
 
         def _save_side_snapshot(side: str, est):
-            if est is None: 
-                return
-            
-            frames_used = list(getattr(est, "frames_used", []) or [])
+            frames_used = list(getattr(est, "frames_used", []) or []) if est else []
             if not frames_used:
-                return
-            # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
-            frames_used = sorted(list(frames_used))
-            if not frames_used:
-                return
+                print(f"DEBUG: No valid frames used for snapshot on {side}. Forcing snapshot at fallback frame.")
+                if len(angles_df) > 0:
+                    mid_label = angles_df.index[len(angles_df) // 2]
+                else:
+                    return
+            else:
+                # Find the largest temporal cluster in frames_used to avoid stragglers/outliers
+                frames_used = sorted(list(frames_used))
 
-            # Simple clustering: split if gap > 10 frames (approx 0.3s at 30fps)
-            clusters = []
-            if frames_used:
+                # Simple clustering: split if gap > 10 frames (approx 0.3s at 30fps)
+                clusters = []
                 current_cluster = [frames_used[0]]
                 for f in frames_used[1:]:
                     if f - current_cluster[-1] > 10:
@@ -338,14 +348,14 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                         current_cluster.append(f)
                 clusters.append(current_cluster)
 
-            # Pick largest cluster
-            largest_cluster = max(clusters, key=len)
-            
-            # Pick median of the largest cluster
-            try:
-                mid_label = int(np.median(np.array(largest_cluster, dtype=float)))
-            except Exception:
-                mid_label = int(largest_cluster[len(largest_cluster) // 2])
+                # Pick largest cluster
+                largest_cluster = max(clusters, key=len)
+                
+                # Pick median of the largest cluster
+                try:
+                    mid_label = int(np.median(np.array(largest_cluster, dtype=float)))
+                except Exception:
+                    mid_label = int(largest_cluster[len(largest_cluster) // 2])
 
             # map label to angles_df index/position
             if mid_label in angles_df.index:
@@ -469,7 +479,7 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
 
             # angle value to show: use est.value_deg if present
             ang_val = getattr(est, "value_deg", None)
-            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode)
+            save_snapshot(video_path=video_path, landmarks_row=lm_row, a_name=a_name, b_name=b_name, c_name=c_name, out_path=out_path, angle_deg=ang_val, angle_mode=snap_mode, pose_name=pose_name)
 
         # Call appropriate snapshot function based on pose type
         if is_bilateral:
@@ -506,6 +516,10 @@ def main(argv: list[str] | None = None) -> int:
     prom_path = Path(args.prom) if args.prom else None
 
     mi4l_cfg = cfg.get("mi4l", {}) or {}
+    # --side CLI flag overrides mi4l.side from config
+    if args.side:
+        mi4l_cfg["side"] = args.side
+        cfg["mi4l"] = mi4l_cfg
     mode_side = str(mi4l_cfg.get("side", "both")).lower().strip()
     
     active_sides = []

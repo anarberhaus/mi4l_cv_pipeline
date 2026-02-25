@@ -58,6 +58,30 @@ def angle_abc_deg(a_xy: np.ndarray, b_xy: np.ndarray, c_xy: np.ndarray) -> np.nd
     return ang
 
 
+def angle_with_reference_deg(v_x: np.ndarray, v_y: np.ndarray, ref_x: float, ref_y: float, aspect: np.ndarray | None = None) -> np.ndarray:
+    """
+    Computes the internal angle (0-180 degrees) between a segment vector (v_x, v_y) and a constant
+    reference vector (ref_x, ref_y). Incorporates optional aspect ratio correction.
+    """
+    if aspect is not None:
+        v_x = v_x * aspect
+        
+    dot = v_x * ref_x + v_y * ref_y
+    v_norm = np.sqrt(v_x**2 + v_y**2)
+    ref_norm = np.sqrt(ref_x**2 + ref_y**2)
+    denom = v_norm * ref_norm
+    
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosang = dot / denom
+        
+    cosang = np.clip(cosang, -1.0, 1.0)
+    ang = np.degrees(np.arccos(cosang))
+    
+    invalid = (denom <= 0) | np.isnan(denom) | np.isnan(v_x) | np.isnan(v_y)
+    ang[invalid] = np.nan
+    return ang
+
+
 def compute_knee_flexion_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     """
     POSE 1 - Kneeling Knee Flexion
@@ -281,8 +305,16 @@ def compute_hip_extension_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     lv_x, lv_y = lx_k - lx_h, ly_k - ly_h
     rv_x, rv_y = rx_k - rx_h, ry_k - ry_h
 
-    left_deg = angle_orientation_deg(lv_x, lv_y, ref_axis="vertical")
-    right_deg = angle_orientation_deg(rv_x, rv_y, ref_axis="vertical")
+    # Aspect ratio correction
+    image_w = landmarks_df.get("image_w")
+    image_h = landmarks_df.get("image_h")
+    if image_w is not None and image_h is not None:
+        aspect = (image_w.to_numpy(dtype=np.float32) / image_h.to_numpy(dtype=np.float32))
+    else:
+        aspect = np.ones(len(landmarks_df), dtype=np.float32)
+
+    left_deg = angle_with_reference_deg(lv_x, lv_y, ref_x=0.0, ref_y=1.0, aspect=aspect)
+    right_deg = angle_with_reference_deg(rv_x, rv_y, ref_x=0.0, ref_y=1.0, aspect=aspect)
 
     out = pd.DataFrame(
         {

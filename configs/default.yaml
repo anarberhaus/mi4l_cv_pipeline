@@ -14,15 +14,15 @@ angles:
 
 qc:
   landmark_visibility_threshold: 0.5
-  min_valid_ratio: 0.3
+  min_valid_ratio: 0.2
   min_valid_frames: 15
 
-  min_bbox_height_px: 150
+  min_bbox_height_px: 100
   require_subject_size: true
 
   edge_margin: 0.02
   exclude_clipped_frames: false
-  max_clipped_ratio: 0.35
+  max_clipped_ratio: 0.50
 
   derivative_deg_per_sec_max: 600.0
 
@@ -48,7 +48,7 @@ stable_plateau:
   min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:
-  side: left  # both | left | right
+  side: both  # both | left | right
   prom_min_deg: 1.0
   prom_lt_arom_tolerance_deg: 2.0
   invalidate_if_prom_lt_arom: true
