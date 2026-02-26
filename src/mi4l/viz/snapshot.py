@@ -523,9 +523,9 @@ def save_snapshot(
             return None
         return _to_px((xv, yv), w, h)
 
-    # Determine which side is active from the a_name / b_name hints
+    # Determine which side is active from the b_name (pivot) / a_name hints
     side = "left"
-    for hint in (a_name or "", b_name or ""):
+    for hint in (b_name or "", a_name or ""):
         if hint.startswith("right_"):
             side = "right"
             break

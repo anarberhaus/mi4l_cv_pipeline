@@ -177,8 +177,9 @@ def run_pose(pose: dict) -> bool:
 
 def main() -> None:
     sep = "=" * 56
+    sep = "=" * 56
     print(f"\n{sep}")
-    print("  MI4L Pipeline – Run All Poses")
+    print("  MI4L Pipeline - Run All Poses")
     print(f"{sep}\n")
 
     results: list[tuple[str, str, str, bool]] = []
@@ -189,14 +190,14 @@ def main() -> None:
         ok = run_pose(pose)
         status = "DONE" if ok else "SKIP/ERROR"
         results.append((pose["name"], pose.get("side", "both"), pose["arom"], ok))
-        print(f"  → {status}\n")
+        print(f"  -> {status}\n")
 
     # Summary table
     print(f"\n{sep}")
     print("  Summary")
     print(sep)
     for name, side, arom, ok in results:
-        icon = "✓" if ok else "✗"
+        icon = "[OK]" if ok else "[XX]"
         print(f"  {icon}  {name:<38} [{side:<5}]  {Path(arom).name}")
     print(sep + "\n")
 

@@ -1,0 +1,2 @@
+joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
+prone_trunk_extension,both,,68.69513320922852,,0.0,1.0,False,arom:low_valid_ratio:0.000<0.200;arom:no_valid_values;arom:too_few_valid_frames:0<15;mi4l:missing_arom_or_prom;subject_too_small:median_bbox_h_px=77.7
