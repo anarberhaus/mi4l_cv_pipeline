@@ -140,7 +140,7 @@ All outputs are written to the folder specified by `--out`:
 
 | File | Description |
 |---|---|
-| `summary.csv` | AROM, PROM, MI4L score, confidence, QC flags per side |
+| `summary.csv` | One-row-per-side summary with ROM scores, biomechanical metrics, and data quality (see column reference below) |
 | `angles_arom.csv` | Per-frame angle values for the AROM video |
 | `angles_prom.csv` | Per-frame angle values for the PROM video |
 | `landmarks_arom.csv` | Raw MediaPipe landmark coordinates (AROM) |
@@ -149,6 +149,40 @@ All outputs are written to the folder specified by `--out`:
 | `plot_<pose>_prom.png` | Angle-over-time plot (PROM) |
 | `snapshots/` | Best-frame annotated images for each side |
 | `config_used.yaml` | Snapshot of the config used for the run |
+
+### `summary.csv` column reference
+
+| Column | Type | Description |
+|---|---|---|
+| **Metadata** | | |
+| `movement_name` | string | Human-readable pose name (e.g. "Kneeling Knee Flexion") |
+| `joint_name` | string | Anatomical joint being assessed (knee, hip, trunk, shoulder) |
+| `angle_type` | string | Measurement geometry: `vector-reference`, `vector-vector`, or `distance` |
+| `side` | string | Body side: `left`, `right`, or `both` |
+| **Core ROM metrics** | | |
+| `arom_deg` | float | Active Range of Motion peak (degrees), top-k mean |
+| `prom_deg` | float | Passive Range of Motion peak (degrees), top-k mean |
+| `mi4l` | float | Mobility Index for Longevity: `(PROM − AROM) / PROM` |
+| `arom_confidence` | float | Estimation confidence for AROM (0–1) |
+| `prom_confidence` | float | Estimation confidence for PROM (0–1) |
+| `mi4l_valid` | bool | Whether the MI4L score passed all validation checks |
+| `qc_flags` | string | Semicolon-separated quality control flags |
+| **Derived metric** | | |
+| `assist_gap` | float | `prom_deg − arom_deg` — passive capacity beyond active control |
+| **End-range quality** | | |
+| `peak_hold_time_s` | float | Longest consecutive time (s) within 2% of peak value |
+| `peak_band_std_deg` | float | Std deviation (°) of angles within the near-peak band |
+| `time_to_peak_s` | float | Time (s) from movement start to first entry into near-peak band |
+| **Motor control** | | |
+| `fit_r2` | float | R² of a degree-3 polynomial fit to the angle time-series |
+| `fit_rmse_deg` | float | RMSE (°) of that polynomial fit |
+| `jerk_rms` | float | RMS of the second derivative of the angle signal |
+| **Compensation** | | |
+| `torso_angle_change_deg` | float | Change in torso orientation (°) from movement start to peak |
+| `pelvis_drift_norm` | float | Normalised horizontal displacement of hip midpoint during movement |
+| **Reliability** | | |
+| `frames_valid_pct` | float | Percentage of frames with valid pose detection inside the movement window |
+| `avg_landmark_visibility` | float | Mean landmark visibility score during the movement window |
 
 ---
 

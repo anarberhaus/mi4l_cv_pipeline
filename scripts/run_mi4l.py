@@ -22,8 +22,9 @@ from mi4l.io.export import (
     save_landmarks_csv,
     save_summary_csv,
 )
-from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau
+from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau, smooth_angle_series
 from mi4l.metrics.mi4l import compute_mi4l
+from mi4l.metrics.summary_metrics import compute_extended_summary
 from mi4l.pose.mediapipe_pose import extract_mediapipe_pose_landmarks
 from mi4l.qc.qc_rules import (
     apply_derivative_qc,
@@ -136,6 +137,22 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     # For bilateral, use combined visibility from both sides
     bilateral_valid = (base_left_valid | base_right_valid) & bilateral_deriv_ok
 
+    # Smooth angle series for downstream extended metrics
+    smooth_cfg = cfg.get("smoothing", {}) or {}
+    smoothed_series: dict[str, np.ndarray] = {}
+    valid_masks: dict[str, np.ndarray] = {}
+    time_arr = angles_df["time_sec"].to_numpy(dtype=float)
+    if is_bilateral and bilateral_col is not None:
+        smoothed_series["bilateral"] = smooth_angle_series(angles_df[bilateral_col], smooth_cfg).to_numpy(dtype=float)
+        valid_masks["bilateral"] = bilateral_valid.to_numpy(dtype=bool)
+    else:
+        if left_col is not None and left_col in angles_df.columns:
+            smoothed_series["left"] = smooth_angle_series(angles_df[left_col], smooth_cfg).to_numpy(dtype=float)
+            valid_masks["left"] = left_valid.to_numpy(dtype=bool)
+        if right_col is not None and right_col in angles_df.columns:
+            smoothed_series["right"] = smooth_angle_series(angles_df[right_col], smooth_cfg).to_numpy(dtype=float)
+            valid_masks["right"] = right_valid.to_numpy(dtype=bool)
+
     # Attach QC columns to angles (keep existing knee-named visibility fields)
     angles_df = angles_df.copy()
     angles_df["left_knee_valid"] = left_valid
@@ -222,10 +239,11 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         plot_knee_angles(
             angles_df=angles_df,
             out_path=out_dir / f"plot_{pose_name}_{kind}.png",
-            title=f"{pose_name} (deg) - {kind.upper()}",
             dpi=dpi,
             robust_frames=robust_frames,
             side=plot_side,
+            pose_name=pose_name,
+            kind=kind,
         )
 
     # Snapshots: export frame image at median of top-K used frames (if provided)
@@ -503,6 +521,9 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         "bilateral": bilateral_est,
         "is_bilateral": is_bilateral,
         "video_flags": video_flags,
+        "smoothed_series": smoothed_series,
+        "valid_masks": valid_masks,
+        "time_arr": time_arr,
     }
 
 
@@ -575,8 +596,7 @@ def main(argv: list[str] | None = None) -> int:
                 qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
             qc_flags.extend([f"mi4l:{f}" for f in mi4l_flags])
             
-            rows.append({
-                "joint": args.pose,
+            row = {
                 "side": "both",
                 "arom_deg": arom_est.value_deg,
                 "prom_deg": prom_est.value_deg if prom_est else None,
@@ -585,7 +605,29 @@ def main(argv: list[str] | None = None) -> int:
                 "prom_confidence": prom_est.confidence if prom_est else None,
                 "mi4l_valid": mi4l_valid,
                 "qc_flags": ";".join(sorted(set(qc_flags))),
-            })
+            }
+
+            # Extended metrics
+            ext_angles = arom_res.get("smoothed_series", {}).get("bilateral", np.array([]))
+            ext_valid = arom_res.get("valid_masks", {}).get("bilateral", np.array([], dtype=bool))
+            ext_time = arom_res.get("time_arr", np.array([]))
+            ext_frames = list(getattr(arom_est, "frames_used", []) or [])
+            ext = compute_extended_summary(
+                pose_name=args.pose,
+                side="both",
+                arom_peak=arom_est.value_deg,
+                prom_peak=prom_est.value_deg if prom_est else None,
+                angles=ext_angles,
+                time_sec=ext_time,
+                valid_mask=ext_valid,
+                peak_val=arom_est.value_deg,
+                landmarks_df=arom_res["landmarks_df"],
+                frames_used=ext_frames,
+            )
+            # side already in row; avoid overwriting
+            ext.pop("side", None)
+            row.update(ext)
+            rows.append(row)
     else:
         # Sided pose: iterate over active sides
         for side in active_sides:
@@ -621,8 +663,7 @@ def main(argv: list[str] | None = None) -> int:
                 qc_flags.extend([f"prom:{f}" for f in prom_est.flags])
             qc_flags.extend([f"mi4l:{f}" for f in mi4l_flags])
 
-            rows.append({
-                "joint": args.pose,
+            row = {
                 "side": side,
                 "arom_deg": arom_est.value_deg,
                 "prom_deg": prom_est.value_deg if prom_est else None,
@@ -631,21 +672,67 @@ def main(argv: list[str] | None = None) -> int:
                 "prom_confidence": prom_est.confidence if prom_est else None,
                 "mi4l_valid": mi4l_valid,
                 "qc_flags": ";".join(sorted(set(qc_flags))),
-            })
+            }
+
+            # Extended metrics
+            ext_angles = arom_res.get("smoothed_series", {}).get(side, np.array([]))
+            ext_valid = arom_res.get("valid_masks", {}).get(side, np.array([], dtype=bool))
+            ext_time = arom_res.get("time_arr", np.array([]))
+            ext_frames = list(getattr(arom_est, "frames_used", []) or [])
+            ext = compute_extended_summary(
+                pose_name=args.pose,
+                side=side,
+                arom_peak=arom_est.value_deg,
+                prom_peak=prom_est.value_deg if prom_est else None,
+                angles=ext_angles,
+                time_sec=ext_time,
+                valid_mask=ext_valid,
+                peak_val=arom_est.value_deg,
+                landmarks_df=arom_res["landmarks_df"],
+                frames_used=ext_frames,
+            )
+            # side already in row; avoid overwriting
+            ext.pop("side", None)
+            row.update(ext)
+            rows.append(row)
 
     summary_df = pd.DataFrame(rows)
+
+    # Enforce a clean, logical column order
+    _COLUMN_ORDER = [
+        # Metadata (front)
+        "movement_name", "joint_name", "angle_type", "side",
+        # Core ROM metrics
+        "arom_deg", "prom_deg", "mi4l",
+        "arom_confidence", "prom_confidence", "mi4l_valid", "qc_flags",
+        # Derived
+        "assist_gap",
+        # End-range quality
+        "peak_hold_time_s", "peak_band_std_deg", "time_to_peak_s",
+        # Motor control
+        "fit_r2", "fit_rmse_deg", "jerk_rms",
+        # Compensation
+        "torso_angle_change_deg", "pelvis_drift_norm",
+        # Reliability
+        "frames_valid_pct", "avg_landmark_visibility",
+    ]
+    ordered = [c for c in _COLUMN_ORDER if c in summary_df.columns]
+    remaining = [c for c in summary_df.columns if c not in ordered]
+    summary_df = summary_df[ordered + remaining]
+
     if cfg.get("export", {}).get("save_summary_csv", True):
         save_summary_csv(summary_df, out_dir / "summary.csv")
 
     # Console summary (short)
     for _, r in summary_df.iterrows():
+        name = str(r.get("movement_name", ""))
         side = str(r["side"]).upper()
         arom = r["arom_deg"]
         prom = r["prom_deg"]
         mi4l = r["mi4l"]
         valid = bool(r["mi4l_valid"])
         flags = str(r["qc_flags"])
-        print(f"[{side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
+        print(f"[{name} | {side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
 
     return 0
 
