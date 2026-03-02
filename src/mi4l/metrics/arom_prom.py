@@ -68,6 +68,132 @@ def smooth_angle_series(angle_deg: pd.Series, smoothing_cfg: dict[str, Any]) -> 
     raise ValueError(f"Unknown smoothing method: {method}")
 
 
+def estimate_movement_window_fallback(
+    values: np.ndarray,
+    ok: np.ndarray,
+    peak_cfg: "dict[str, Any]",
+    n_total: int,
+    n_valid_original: int,
+    flags_in: "list[str]",
+    angle_index: "Any",
+    direction: str = "max",
+) -> "RobustMaxResult | None":
+    """
+    Fallback peak estimator for AROM movements where the peak is never *held*
+    for enough consecutive frames to pass the primary method.
+
+    Algorithm
+    ---------
+    1. Compute frame-to-frame derivative of the smoothed angle series.
+    2. Smooth the derivative (rolling mean, window=3) to suppress noise.
+    3. Find movement start  = first frame where derivative >= +slope_threshold.
+    4. Find movement end   = first frame *after* the peak where derivative <= -slope_threshold.
+    5. Apply movement_buffer_frames inward on both sides.
+    6. Within the trimmed window collect valid values, take top fallback_top_percent.
+    7. Return median of those values with confidence=0.5.
+
+    Returns None if the window cannot be determined (fallback inconclusive).
+    """
+    slope_threshold: float = float(peak_cfg.get("slope_threshold", 3.0))
+    buffer: int = int(peak_cfg.get("movement_buffer_frames", 5))
+    top_pct: float = float(peak_cfg.get("fallback_top_percent", 0.20))
+    top_pct = min(max(top_pct, 0.01), 1.0)
+
+    n = len(values)
+    if n < 3:
+        return None
+
+    # 1. Derivative (forward difference, padded with 0 at end)
+    deriv = np.zeros(n, dtype=float)
+    deriv[:-1] = np.diff(values)
+    # Zero out derivative at invalid frames so slope detection ignores them
+    deriv[~ok] = 0.0
+
+    # 2. Smooth derivative (rolling mean, window=3)
+    deriv_s = pd.Series(deriv).rolling(window=3, center=True, min_periods=1).mean().to_numpy()
+
+    # 3. Peak location: argmax/argmin of value within valid frames
+    valid_vals = np.where(ok, values, np.nan)
+    if direction == "min":
+        peak_idx = int(np.nanargmin(valid_vals))
+    else:
+        peak_idx = int(np.nanargmax(valid_vals))
+
+    # 4a. Movement start: last strong positive slope BEFORE peak
+    search_start = deriv_s[:peak_idx]
+    pos_mask = search_start >= slope_threshold
+    if not pos_mask.any():
+        # No strong rise found – fallback inconclusive
+        return None
+    win_start = int(np.where(pos_mask)[0][0])   # first onset of rise
+
+    # 4b. Movement end: first strong negative slope AFTER peak
+    search_end = deriv_s[peak_idx:]
+    if direction == "min":
+        neg_mask = search_end >= slope_threshold   # recovery is positive for min direction
+    else:
+        neg_mask = search_end <= -slope_threshold
+    if not neg_mask.any():
+        # No strong drop found after peak – use end of series
+        win_end = n - 1
+    else:
+        win_end = peak_idx + int(np.where(neg_mask)[0][0])
+
+    # 5. Apply buffer
+    win_start = win_start + buffer
+    win_end = win_end - buffer
+
+    # 6. Validate window
+    if win_end - win_start < 3:
+        return None
+
+    window_ok = ok.copy()
+    window_ok[:win_start] = False
+    window_ok[win_end + 1:] = False
+
+    window_vals = values[window_ok]
+    if window_vals.size == 0:
+        return None
+
+    # 7. Top top_pct% by value
+    k = max(1, int(np.ceil(top_pct * window_vals.size)))
+    k = min(k, window_vals.size)
+    if direction == "min":
+        top_vals = np.sort(window_vals)[:k]
+    else:
+        top_vals = np.sort(window_vals)[-k:]
+
+    est = float(np.nanmedian(top_vals))
+    if not np.isfinite(est):
+        return None
+
+    # Map back to original index labels for frames_used
+    window_idx = np.nonzero(window_ok)[0]
+    # Only include the top-k frames in frames_used
+    if direction == "min":
+        top_positions = np.argsort(window_vals)[:k]
+    else:
+        top_positions = np.argsort(window_vals)[-k:]
+    try:
+        idx_labels = np.asarray(angle_index)
+        frames_used = [int(idx_labels[window_idx[p]]) for p in top_positions]
+    except Exception:
+        frames_used = [int(window_idx[p]) for p in top_positions]
+
+    n_window_valid = int(window_ok.sum())
+    confidence = 0.5  # reduced confidence for fallback path
+
+    return RobustMaxResult(
+        value_deg=est,
+        confidence=confidence,
+        n_total=n_total,
+        n_valid=n_valid_original,
+        n_used=k,
+        flags=list(flags_in) + ["fallback_movement_window"],
+        frames_used=frames_used,
+    )
+
+
 def estimate_robust_max(
     angle_deg: pd.Series,
     valid_mask: pd.Series,
@@ -136,7 +262,35 @@ def estimate_robust_max(
         # Re-calc n_valid
         n_valid = int(ok.sum())
         if n_valid == 0:
-             return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=0, n_used=0, flags=flags + ["no_valid_hold"])
+            # ----------------------------------------------------------------
+            # Fallback: movement-window strategy (AROM short-hold case)
+            # ----------------------------------------------------------------
+            peak_cfg = robust_cfg.get("_peak_detection", {})
+            if bool(peak_cfg.get("fallback_enabled", False)):
+                print(
+                    "WARNING: Primary peak detection failed – using movement-window fallback"
+                )
+                ok_original = (vm & np.isfinite(values))
+                fb = estimate_movement_window_fallback(
+                    values=values,
+                    ok=ok_original,
+                    peak_cfg=peak_cfg,
+                    n_total=n_total,
+                    n_valid_original=int(ok_original.sum()),
+                    flags_in=flags + ["no_valid_hold"],
+                    angle_index=angle_deg.index,
+                    direction=direction,
+                )
+                if fb is not None:
+                    return fb
+            return RobustMaxResult(
+                value_deg=None,
+                confidence=0.0,
+                n_total=n_total,
+                n_valid=0,
+                n_used=0,
+                flags=flags + ["no_valid_hold"],
+            )
         
         # Re-calc k based on new n_valid? 
         # Usually we want k to be based on the *filtered* valid count to pick the peak of the hold.

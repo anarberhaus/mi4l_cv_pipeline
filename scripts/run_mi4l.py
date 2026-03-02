@@ -150,8 +150,12 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
 
     # 5) Robust max (top-K median)
     smooth_cfg = cfg.get("smoothing", {}) or {}
-    robust_cfg = cfg.get("robust_max", {}) or {}
+    robust_cfg = dict(cfg.get("robust_max", {}) or {})  # shallow copy – safe to mutate
     qc_cfg = cfg.get("qc", {}) or {}
+    # Inject peak_detection sub-config so estimate_robust_max can read fallback params
+    # without requiring a signature change.
+    peak_detection_cfg = cfg.get("peak_detection", {}) or {}
+    robust_cfg["_peak_detection"] = peak_detection_cfg
 
     def _compute_est_for_col(col_name, valid_mask=None):
         if col_name is None or col_name not in angles_df.columns:

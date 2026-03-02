@@ -18,7 +18,7 @@ qc:
   min_valid_frames: 15
 
   min_bbox_height_px: 100
-  require_subject_size: true
+  require_subject_size: false   # size is a video-level warning; does NOT exclude frames
 
   edge_margin: 0.02
   exclude_clipped_frames: false
@@ -40,6 +40,15 @@ robust_max:
   topk_percent: 0.10
   min_topk_frames: 5
   min_hold_frames: 15
+
+peak_detection:
+  hold_frames: 15          # for reference – keep in sync with robust_max.min_hold_frames
+  top_k: 5                 # for reference – keep in sync with robust_max.min_topk_frames
+
+  fallback_enabled: true   # activate movement-window fallback when primary held-peak fails
+  slope_threshold: 3.0     # deg/frame – min absolute derivative to count as a significant slope
+  movement_buffer_frames: 5    # frames to trim inward from detected window edges
+  fallback_top_percent: 0.20   # top fraction of window values used for the fallback estimate
 
 stable_plateau:
   stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
