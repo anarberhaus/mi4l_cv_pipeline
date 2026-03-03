@@ -4,139 +4,242 @@ Computer-vision pipeline that estimates joint angles from RGB video and computes
 
 ---
 
+## Table of contents
+
+1. [Project structure](#project-structure)
+2. [Setup](#setup-recommended-conda)
+3. [Quick start](#quick-start)
+4. [Running a single pose](#running-a-single-pose)
+5. [Running all poses at once](#running-all-poses-at-once)
+6. [Supported poses](#supported-poses)
+7. [Outputs](#outputs)
+8. [Configuration](#configuration-configsdefaultyaml)
+9. [How it works](#how-it-works)
+
+---
+
 ## Project structure
 
 ```
 mi4l_cv_pipeline/
 ├── src/mi4l/
-│   ├── angles/       # Joint angle computation (all poses)
+│   ├── angles/       # Joint angle computation (per pose)
 │   ├── io/           # Landmark / CSV / config I/O
-│   ├── metrics/      # AROM/PROM estimation & MI4L computation
+│   ├── metrics/      # AROM/PROM estimation, MI4L, summary metrics
 │   ├── pose/         # MediaPipe landmark extraction
-│   ├── qc/           # Quality-control rules & flags
+│   ├── qc/           # Quality-control rules and flags
 │   ├── utils/        # Config loading, helpers
-│   └── viz/          # Plots & snapshot export
+│   └── viz/          # Plots and snapshot export
 ├── scripts/
-│   └── run_mi4l.py   # Main CLI entry point
+│   ├── run_mi4l.py   # Main CLI – run ONE pose
+│   └── run_all.py    # Convenience script – run ALL poses
 ├── configs/
 │   └── default.yaml  # Default config (thresholds, params)
-├── data/             # Local test videos (gitignored)
-│   ├── arom/         # Recommended folder for AROM videos
-│   └── prom/         # Recommended folder for PROM videos
+├── data/             # Your video files (gitignored)
+│   ├── arom/         # AROM video files go here
+│   ├── prom/         # PROM video files go here
+│   └── other/        # Videos that are neither arom nor prom
 ├── results/          # Pipeline outputs (gitignored)
+├── tests/            # Unit tests
+└── requirements.txt  # Python dependencies
 ```
 
 ---
 
-## Setup
+## Setup (recommended: conda)
+
+> **Why conda?**
+> MediaPipe requires Python 3.10 or 3.11 and a pip-installed version of the package. Using conda lets you isolate the correct Python version from whatever else is on your system, which is the most reliable way to get everything working.
+
+### Option A – conda (recommended)
 
 ```bash
-# Create and activate virtual environment (recommended)
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
+# 1. Create a dedicated environment with Python 3.10
+conda create -n mi4l python=3.10 -y
+conda activate mi4l
 
-# Install the package in editable mode
-pip install -U pip
-pip install opencv-python mediapipe pandas numpy scipy
+# 2. Install dependencies via pip (inside the activated env)
+pip install -r requirements.txt
+
+# 3. Install the pipeline package itself in editable mode
 pip install -e .
 ```
 
----
-
-## CLI usage
-
-All runs go through `scripts/run_mi4l.py`.
-
-### Basic syntax
-
+After this, always activate your environment before running:
 ```bash
-python scripts/run_mi4l.py \
-  --arom  "data/arom/video_name.mp4" \
-  --prom  "data/prom/video_name.mp4" \
-  --out   "results/run_001/" \
-  --pose  <POSE_NAME> \
-  --config configs/default.yaml
+conda activate mi4l
 ```
 
-`--prom` is **optional** — omit it to run AROM-only (no MI4L score will be computed).
+### Option B – plain virtual environment (venv)
 
-### Supported poses
+If you prefer not to use conda, make sure you are on **Python 3.10 or 3.11** first, then:
 
-| `--pose` value | Assessment |
-|---|---|
-| `kneeling_knee_flexion` | Knee flexion |
-| `prone_trunk_extension` | Trunk / lumbar extension |
-| `standing_hip_abduction` | Hip abduction |
-| `bilateral_leg_straddle` | Bilateral leg straddle |
-| `unilateral_hip_extension` | Hip extension (one leg) |
-| `shoulder_flexion` | Shoulder flexion |
-| `shoulder_stick_pass_through` | Shoulder stick pass-through mobility |
-
-### Example commands
-
-**Knee flexion (both sides, AROM + PROM):**
 ```bash
+# Create and activate venv
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+# source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Verify the installation
+
+```bash
+python -c "import mediapipe as mp; mp.solutions.pose.PoseLandmark; print('All good!')"
+```
+
+If this prints `All good!` you are set. If it raises an error, make sure you are in the right environment and that mediapipe was installed via `pip` (not conda-forge).
+
+---
+
+## Quick start
+
+**All commands are run from the project root directory.**
+
+```bash
+# Activate environment first
+conda activate mi4l   # or source .venv/bin/activate
+
+# Run a single pose (example: right knee flexion)
 python scripts/run_mi4l.py \
-  --arom  "data/arom/knee_arom.mp4" \
-  --prom  "data/prom/knee_prom.mp4" \
-  --out   "results/knee_flexion/" \
+  --arom  data/arom/knee_flex_ra.mp4 \
+  --prom  data/prom/knee_flex_rp.mp4 \
+  --out   results/kneeling_knee_flexion_right \
   --pose  kneeling_knee_flexion \
+  --side  right \
+  --config configs/default.yaml
+
+# Run all poses defined in run_all.py at once
+python scripts/run_all.py
+```
+
+Results are saved to the folder specified by `--out` (or to `results/<pose>/` when using `run_all.py`).
+
+---
+
+## Running a single pose
+
+Use `scripts/run_mi4l.py` when you want to process one specific pose.
+
+### Syntax
+
+```bash
+python scripts/run_mi4l.py \
+  --arom   <path/to/arom_video.mp4> \
+  --prom   <path/to/prom_video.mp4> \   # optional – omit for AROM-only
+  --out    <output_folder/> \
+  --pose   <pose_name> \
+  --side   <left|right|both> \
   --config configs/default.yaml
 ```
 
-**Shoulder flexion (AROM only, left side):**
+### Arguments
+
+| Argument | Required | Description |
+|---|---|---|
+| `--arom` | ✅ | Path to the AROM video file |
+| `--prom` | ❌ | Path to the PROM video file. Omit to run AROM-only (MI4L will not be computed) |
+| `--out` | ✅ | Output directory (created automatically if it does not exist) |
+| `--pose` | ✅ | Pose name (see [Supported poses](#supported-poses)) |
+| `--side` | ✅ | `left`, `right`, or `both` |
+| `--config` | ✅ | Path to YAML config file (use `configs/default.yaml`) |
+
+### Examples
+
+**Knee flexion – right side, AROM + PROM:**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/arom/shoulder_arom.mp4" \
-  --out   "results/shoulder_flexion/" \
+  --arom  data/arom/knee_flex_ra.mp4 \
+  --prom  data/prom/knee_flex_rp.mp4 \
+  --out   results/kneeling_knee_flexion_right \
+  --pose  kneeling_knee_flexion \
+  --side  right \
+  --config configs/default.yaml
+```
+
+**Shoulder flexion – AROM only, left side:**
+```bash
+python scripts/run_mi4l.py \
+  --arom  data/arom/shoulder_la.mp4 \
+  --out   results/shoulder_flexion \
   --pose  shoulder_flexion \
-  --config configs/default.yaml
-```
-> Set `mi4l.side: left` in `configs/default.yaml` to restrict to one side.
-
-**Shoulder stick pass-through:**
-```bash
-python scripts/run_mi4l.py \
-  --arom  "data/arom/stick_arom.mp4" \
-  --prom  "data/prom/stick_prom.mp4" \
-  --out   "results/stick_pass_through/" \
-  --pose  shoulder_stick_pass_through \
+  --side  left \
   --config configs/default.yaml
 ```
 
-**Hip extension (right side only):**
+**Bilateral leg straddle – both sides:**
 ```bash
 python scripts/run_mi4l.py \
-  --arom  "data/arom/hip_ext_arom.mp4" \
-  --out   "results/hip_extension/" \
-  --pose  unilateral_hip_extension \
+  --arom  data/arom/legSpread_arom.mp4 \
+  --prom  data/prom/legSpread_prom.mp4 \
+  --out   results/bilateral_leg_straddle \
+  --pose  bilateral_leg_straddle \
+  --side  both \
   --config configs/default.yaml
 ```
 
 ---
 
-## Configuration (`configs/default.yaml`)
+## Running all poses at once
 
-| Section | Key | Default | Description |
-|---|---|---|---|
-| `pose` | `model_complexity` | `1` | MediaPipe model complexity (0–2) |
-| `pose` | `min_detection_confidence` | `0.5` | Minimum detection confidence |
-| `pose` | `frame_stride` | `1` | Process every N-th frame |
-| `qc` | `landmark_visibility_threshold` | `0.5` | Min MediaPipe visibility score |
-| `qc` | `min_bbox_height_px` | `150` | Min subject height in pixels |
-| `qc` | `derivative_deg_per_sec_max` | `600` | Max angle change rate (deg/s) |
-| `smoothing` | `method` | `median` | `none` / `median` / `savgol` |
-| `robust_max` | `topk_percent` | `0.10` | Top-K % of frames for AROM/PROM |
-| `mi4l` | `side` | `left` | `both` / `left` / `right` |
-| `export` | `save_snapshots` | `true` | Save best-frame snapshot images |
-| `export` → `plots` | `enabled` | `true` | Generate angle-over-time plots |
+`scripts/run_all.py` loops over every pose defined in its `POSES` list and calls `run_mi4l.py` for each one sequentially.
+
+```bash
+python scripts/run_all.py
+```
+
+### What it does
+
+1. Auto-detects a suitable Python interpreter (one that has mediapipe with `mp.solutions.pose` available). If your conda environment is active, it will be found automatically.
+2. Runs each pose in sequence. Poses whose AROM video file is not found on disk are skipped with a `[SKIP]` message.
+3. Prints a summary table at the end showing which poses succeeded.
+
+### Customising the pose list
+
+Open `scripts/run_all.py` and edit the `POSES` list near the top. Each entry maps a pose name to its video files, output folder, and side:
+
+```python
+{
+    "name": "kneeling_knee_flexion",
+    "arom": "data/arom/knee_flex_ra.mp4",
+    "prom": "data/prom/knee_flex_rp.mp4",   # set to None for AROM-only
+    "out":  "results/kneeling_knee_flexion_right",
+    "side": "right",
+},
+```
+
+If `run_all.py` picks the wrong Python interpreter, set `PYTHON_OVERRIDE` at the top of the file to the full path of your interpreter:
+
+```python
+# scripts/run_all.py  – line ~88
+PYTHON_OVERRIDE = r"C:\Users\you\anaconda3\envs\mi4l\python.exe"
+```
+
+---
+
+## Supported poses
+
+| `--pose` value | Movement | `--side` |
+|---|---|---|
+| `kneeling_knee_flexion` | Knee Flexion | `left` or `right` |
+| `prone_trunk_extension` | Trunk / Lumbar Extension | `both` |
+| `standing_hip_abduction` | Hip Abduction | `left` or `right` |
+| `bilateral_leg_straddle` | Bilateral Leg Straddle | `both` |
+| `unilateral_hip_extension` | Hip Extension (one leg) | `left` or `right` |
+| `shoulder_flexion` | Shoulder Flexion | `left` or `right` |
+| `shoulder_stick_pass_through` | Shoulder Stick Pass-Through | `both` |
 
 ---
 
 ## Outputs
 
-All outputs are written to the folder specified by `--out`:
+All output files are written to the folder specified by `--out`:
 
 | File | Description |
 |---|---|
@@ -148,7 +251,7 @@ All outputs are written to the folder specified by `--out`:
 | `plot_<pose>_arom.png` | Angle-over-time plot (AROM) |
 | `plot_<pose>_prom.png` | Angle-over-time plot (PROM) |
 | `snapshots/` | Best-frame annotated images for each side |
-| `config_used.yaml` | Snapshot of the config used for the run |
+| `config_used.yaml` | Snapshot of the config used for this run |
 
 ### `summary.csv` column reference
 
@@ -156,7 +259,7 @@ All outputs are written to the folder specified by `--out`:
 |---|---|---|
 | **Metadata** | | |
 | `movement_name` | string | Human-readable pose name (e.g. "Kneeling Knee Flexion") |
-| `joint_name` | string | Anatomical joint being assessed (knee, hip, trunk, shoulder) |
+| `joint_name` | string | Anatomical joint assessed (knee, hip, trunk, shoulder) |
 | `angle_type` | string | Measurement geometry: `vector-reference`, `vector-vector`, or `distance` |
 | `side` | string | Body side: `left`, `right`, or `both` |
 | **Core ROM metrics** | | |
@@ -181,16 +284,35 @@ All outputs are written to the folder specified by `--out`:
 | `torso_angle_change_deg` | float | Change in torso orientation (°) from movement start to peak |
 | `pelvis_drift_norm` | float | Normalised horizontal displacement of hip midpoint during movement |
 | **Reliability** | | |
-| `frames_valid_pct` | float | Percentage of frames with valid pose detection inside the movement window |
+| `frames_valid_pct` | float | Percentage of frames with valid pose detection in the movement window |
 | `avg_landmark_visibility` | float | Mean landmark visibility score during the movement window |
+
+---
+
+## Configuration (`configs/default.yaml`)
+
+| Section | Key | Default | Description |
+|---|---|---|---|
+| `pose` | `model_complexity` | `1` | MediaPipe model complexity (0 = fastest, 2 = most accurate) |
+| `pose` | `min_detection_confidence` | `0.5` | Minimum detection confidence |
+| `pose` | `frame_stride` | `1` | Process every N-th frame (increase to speed up at cost of resolution) |
+| `qc` | `landmark_visibility_threshold` | `0.5` | Min MediaPipe visibility score to treat a frame as valid |
+| `qc` | `min_bbox_height_px` | `150` | Minimum subject height in pixels (smaller = subject too far away) |
+| `qc` | `derivative_deg_per_sec_max` | `600` | Max angle change rate; frames exceeding this are rejected |
+| `smoothing` | `method` | `median` | Smoothing method: `none`, `median`, or `savgol` |
+| `robust_max` | `topk_percent` | `0.10` | Fraction of frames used for the top-K peak estimate |
+| `mi4l` | `side` | `left` | Default side when `--side` is not passed on CLI |
+| `export` | `save_snapshots` | `true` | Save annotated best-frame images |
+| `export › plots` | `enabled` | `true` | Generate angle-over-time plots |
 
 ---
 
 ## How it works
 
-1. **Landmark extraction** — MediaPipe Pose extracts 33 body landmarks per frame.
-2. **Angle computation** — pose-specific geometry converts landmarks to joint angles (or normalised distances for stick pass-through).
-3. **Quality control** — frames are filtered by landmark visibility, subject size, clipping, and angle derivative limits.
-4. **AROM/PROM estimation** — the top-K median of valid frames gives a robust peak angle.
-5. **MI4L computation** — `MI4L = AROM / PROM` (clamped and validated).
-6. **Export** — CSVs, plots, and snapshots are written to the output folder.
+1. **Landmark extraction** — MediaPipe Pose detects 33 body landmarks per frame from the RGB video.
+2. **Angle computation** — Pose-specific geometry converts landmarks into joint angles (or normalised distances for the stick pass-through).
+3. **Quality control** — Frames are filtered by landmark visibility, subject size, clipping, and angle derivative limits. Failing frames are excluded from estimation.
+4. **AROM / PROM estimation** — The top-K median of valid frames in the detected movement window gives a robust peak angle. A short-hold fallback handles movements that don't sustain the peak for long.
+5. **MI4L computation** — `MI4L = (PROM − AROM) / PROM`, clamped to [0, 1] and validated.
+6. **Extended metrics** — Additional biomechanical metrics (end-range quality, motor control, compensation, reliability) are computed from the same movement window.
+7. **Export** — Summary CSV, per-frame angle CSVs, angle-over-time plots, annotated snapshots, and a copy of the config are written to the output folder.
