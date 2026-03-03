@@ -1,0 +1,2 @@
+joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
+bilateral_leg_straddle,both,106.19061279296875,99.48340225219727,,1.0,1.0,False,mi4l:prom_lt_arom:99.483+2.000<106.191

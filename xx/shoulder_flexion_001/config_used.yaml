@@ -1,0 +1,51 @@
+pose:
+  backend: mediapipe
+  model_complexity: 1
+  static_image_mode: false
+  smooth_landmarks: true
+  enable_segmentation: false
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  frame_stride: 1
+angles:
+  joints:
+  - knee_flexion
+qc:
+  landmark_visibility_threshold: 0.5
+  min_valid_ratio: 0.2
+  min_valid_frames: 15
+  min_bbox_height_px: 100
+  require_subject_size: true
+  edge_margin: 0.02
+  exclude_clipped_frames: false
+  max_clipped_ratio: 0.5
+  derivative_deg_per_sec_max: 600.0
+smoothing:
+  method: median
+  interpolate_limit: 5
+  median_window: 7
+  savgol_window: 11
+  savgol_polyorder: 3
+robust_max:
+  method: topk_median
+  topk_percent: 0.1
+  min_topk_frames: 5
+  min_hold_frames: 15
+mi4l:
+  prom_min_deg: 1.0
+  prom_lt_arom_tolerance_deg: 2.0
+  invalidate_if_prom_lt_arom: true
+  side: both
+export:
+  save_landmarks_csv: true
+  save_angles_csv: true
+  save_summary_csv: true
+  save_config_used: true
+  plots:
+    enabled: true
+    dpi: 150
+stable_plateau:
+  stability_window_frames: 30
+  stability_threshold: 0.15
+  min_value_threshold: 1.2
+  min_plateau_frames: 10

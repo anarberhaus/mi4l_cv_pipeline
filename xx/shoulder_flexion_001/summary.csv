@@ -1,0 +1,3 @@
+joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
+shoulder_flexion,left,179.36663818359375,178.88038635253906,-0.002718307137912695,1.0,1.0,True,subject_too_small:median_bbox_h_px=90.6;too_many_clipped_frames:0.998
+shoulder_flexion,right,10.654861450195312,179.09042358398438,0.9405056884842381,1.0,1.0,True,subject_too_small:median_bbox_h_px=90.6;too_many_clipped_frames:0.998

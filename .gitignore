@@ -1,6 +1,9 @@
 # data / outputs
 data/
+results_testing/
 results/
+prompt.md
+run_all_poses.bat
 *.mp4
 *.mov
 *.avi

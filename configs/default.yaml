@@ -14,15 +14,15 @@ angles:
 
 qc:
   landmark_visibility_threshold: 0.5
-  min_valid_ratio: 0.3
+  min_valid_ratio: 0.2
   min_valid_frames: 15
 
-  min_bbox_height_px: 200
-  require_subject_size: true
+  min_bbox_height_px: 100
+  require_subject_size: false   # size is a video-level warning; does NOT exclude frames
 
   edge_margin: 0.02
   exclude_clipped_frames: false
-  max_clipped_ratio: 0.35
+  max_clipped_ratio: 0.50
 
   derivative_deg_per_sec_max: 600.0
 
@@ -37,10 +37,27 @@ smoothing:
 
 robust_max:
   method: topk_median
-  topk_percent: 0.05
+  topk_percent: 0.10
   min_topk_frames: 5
+  min_hold_frames: 15
+
+peak_detection:
+  hold_frames: 15          # for reference – keep in sync with robust_max.min_hold_frames
+  top_k: 5                 # for reference – keep in sync with robust_max.min_topk_frames
+
+  fallback_enabled: true   # activate movement-window fallback when primary held-peak fails
+  slope_threshold: 3.0     # deg/frame – min absolute derivative to count as a significant slope
+  movement_buffer_frames: 5    # frames to trim inward from detected window edges
+  fallback_top_percent: 0.20   # top fraction of window values used for the fallback estimate
+
+stable_plateau:
+  stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
+  stability_threshold: 0.15     # max rolling std to be considered "stable"
+  min_value_threshold: 1.2      # minimum normalized value (e.g. 1.2x shoulder width)
+  min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:
+  side: right  # both | left | right
   prom_min_deg: 1.0
   prom_lt_arom_tolerance_deg: 2.0
   invalidate_if_prom_lt_arom: true
