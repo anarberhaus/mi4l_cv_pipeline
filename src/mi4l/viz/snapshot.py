@@ -327,18 +327,27 @@ def _render_kneeling_knee_flexion(frame, lm_row, w, h, side, **_):
     return pt(f"{side}_hip"), B, C, "kneeling_knee"
 
 
-def _render_unilateral_hip_extension(frame, lm_row, w, h, side, **_):
-    """Hip extension: Knee – Hip vs. vertical reference."""
+def _render_unilateral_hip_extension(frame, lm_row, w, h, side=None, **_):
+    """Hip extension: pelvis_center → both knees, bilateral wedge."""
     def pt(name):
         xv = lm_row.get(f"{name}_x"); yv = lm_row.get(f"{name}_y")
         if xv is None or yv is None: return None
         if not (np.isfinite(float(xv)) and np.isfinite(float(yv))): return None
         return _to_px((float(xv), float(yv)), w, h)
 
-    B = pt(f"{side}_hip")
-    C = pt(f"{side}_knee")
-    _render_vertical(frame, B, C)
-    return pt("shoulder_midpoint"), B, C, "vertical"
+    # Compute pelvis_center if not already present
+    if lm_row.get("pelvis_center_x") is None:
+        lhx = lm_row.get("left_hip_x"); lhy = lm_row.get("left_hip_y")
+        rhx = lm_row.get("right_hip_x"); rhy = lm_row.get("right_hip_y")
+        if None not in (lhx, lhy, rhx, rhy):
+            lm_row["pelvis_center_x"] = (float(lhx) + float(rhx)) / 2.0
+            lm_row["pelvis_center_y"] = (float(lhy) + float(rhy)) / 2.0
+
+    A = pt("left_knee")
+    B = pt("pelvis_center")
+    C = pt("right_knee")
+    _render_bilateral(frame, A, B, C)
+    return A, B, C, "bilateral"
 
 
 def _render_standing_hip_abduction(frame, lm_row, w, h, side, **_):

@@ -39,7 +39,7 @@ POSE_METADATA: dict[str, dict[str, str]] = {
     "unilateral_hip_extension": {
         "movement_name": "Unilateral Hip Extension",
         "joint_name": "hip",
-        "angle_type": "vector-reference",
+        "angle_type": "vector-vector",
     },
     "shoulder_flexion": {
         "movement_name": "Shoulder Flexion",

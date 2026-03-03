@@ -285,25 +285,36 @@ def compute_bilateral_leg_straddle_angle(landmarks_df: pd.DataFrame) -> pd.DataF
 def compute_hip_extension_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     """
     POSE 5 - Unilateral Hip Extension
-    Vector: Knee - Hip (Thigh)
-    Reference: Vertical (0=Vertical)
+
+    Computes the angular separation between the two thigh segments
+    (hip→knee for each leg) using angular positions in the image plane,
+    corrected for video aspect ratio.
+
+    This is a vector-vector measurement (same approach as the bilateral leg
+    straddle) — it captures the true range of motion between both legs
+    regardless of trunk orientation.
+
+    Method:
+        1. pelvis_center = midpoint(left_hip, right_hip)
+        2. Scale x-coordinates by (image_w / image_h) to correct aspect ratio
+        3. angle_to_left  = atan2(dy_left_knee,  dx_left_knee_scaled)
+        4. angle_to_right = atan2(dy_right_knee, dx_right_knee_scaled)
+        5. separation = abs(angle_right - angle_left)
+        6. if separation > 180°: separation = 360° - separation
     """
-    def _xy(prefix: str) -> tuple[np.ndarray, np.ndarray]:
+
+    def _xy(prefix: str) -> np.ndarray:
         x = landmarks_df.get(f"{prefix}_x")
         y = landmarks_df.get(f"{prefix}_y")
         if x is None or y is None:
-            nan = np.full(len(landmarks_df), np.nan, dtype=np.float32)
-            return nan, nan
-        return x.to_numpy(dtype=np.float32), y.to_numpy(dtype=np.float32)
+            return np.full((len(landmarks_df), 2), np.nan, dtype=np.float32)
+        return np.column_stack([x.to_numpy(dtype=np.float32),
+                                y.to_numpy(dtype=np.float32)])
 
-    lx_h, ly_h = _xy("left_hip")
-    rx_h, ry_h = _xy("right_hip")
-    lx_k, ly_k = _xy("left_knee")
-    rx_k, ry_k = _xy("right_knee")
-
-    # Vector = Knee - Hip
-    lv_x, lv_y = lx_k - lx_h, ly_k - ly_h
-    rv_x, rv_y = rx_k - rx_h, ry_k - ry_h
+    l_hip = _xy("left_hip")
+    r_hip = _xy("right_hip")
+    l_knee = _xy("left_knee")
+    r_knee = _xy("right_knee")
 
     # Aspect ratio correction
     image_w = landmarks_df.get("image_w")
@@ -313,15 +324,37 @@ def compute_hip_extension_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     else:
         aspect = np.ones(len(landmarks_df), dtype=np.float32)
 
-    left_deg = angle_with_reference_deg(lv_x, lv_y, ref_x=0.0, ref_y=1.0, aspect=aspect)
-    right_deg = angle_with_reference_deg(rv_x, rv_y, ref_x=0.0, ref_y=1.0, aspect=aspect)
+    # Pelvis center is the reference point
+    pelvis_center = (l_hip + r_hip) / 2.0
+
+    # Compute deltas from pelvis center to each knee
+    dx_left = (l_knee[:, 0] - pelvis_center[:, 0]) * aspect
+    dy_left = l_knee[:, 1] - pelvis_center[:, 1]
+    angle_to_left = np.arctan2(dy_left, dx_left)
+
+    dx_right = (r_knee[:, 0] - pelvis_center[:, 0]) * aspect
+    dy_right = r_knee[:, 1] - pelvis_center[:, 1]
+    angle_to_right = np.arctan2(dy_right, dx_right)
+
+    # Convert to degrees
+    angle_to_left_deg = np.degrees(angle_to_left)
+    angle_to_right_deg = np.degrees(angle_to_right)
+
+    # Compute angular separation (always positive)
+    separation = np.abs(angle_to_right_deg - angle_to_left_deg)
+
+    # If separation > 180°, take the complementary angle
+    separation = np.where(separation > 180, 360 - separation, separation)
+
+    # Mark invalid where inputs are NaN
+    invalid = np.isnan(dx_left) | np.isnan(dy_left) | np.isnan(dx_right) | np.isnan(dy_right)
+    separation[invalid] = np.nan
 
     out = pd.DataFrame(
         {
             "frame_idx": landmarks_df["frame_idx"].to_numpy(dtype=int),
             "time_sec": landmarks_df["time_sec"].to_numpy(dtype=float),
-            "left_hip_extension_deg": left_deg,
-            "right_hip_extension_deg": right_deg,
+            "hip_extension_deg": separation,
         }
     )
     return out

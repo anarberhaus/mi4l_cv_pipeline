@@ -31,8 +31,8 @@ mi4l_cv_pipeline/
 │   ├── utils/        # Config loading, helpers
 │   └── viz/          # Plots and snapshot export
 ├── scripts/
-│   ├── run_mi4l.py   # Main CLI – run ONE pose
-│   └── run_all.py    # Convenience script – run ALL poses
+│   ├── run_mi4l.py   # Main CLI: run ONE pose
+│   └── run_all.py    # Convenience script: run ALL poses
 ├── configs/
 │   └── default.yaml  # Default config (thresholds, params)
 ├── data/             # Your video files (gitignored)
@@ -51,7 +51,7 @@ mi4l_cv_pipeline/
 > **Why conda?**
 > MediaPipe requires Python 3.10 or 3.11 and a pip-installed version of the package. Using conda lets you isolate the correct Python version from whatever else is on your system, which is the most reliable way to get everything working.
 
-### Option A – conda (recommended)
+### Option A: conda (recommended)
 
 ```bash
 # 1. Create a dedicated environment with Python 3.10
@@ -70,7 +70,7 @@ After this, always activate your environment before running:
 conda activate mi4l
 ```
 
-### Option B – plain virtual environment (venv)
+### Option B: plain virtual environment (venv)
 
 If you prefer not to use conda, make sure you are on **Python 3.10 or 3.11** first, then:
 
@@ -132,7 +132,7 @@ Use `scripts/run_mi4l.py` when you want to process one specific pose.
 ```bash
 python scripts/run_mi4l.py \
   --arom   <path/to/arom_video.mp4> \
-  --prom   <path/to/prom_video.mp4> \   # optional – omit for AROM-only
+  --prom   <path/to/prom_video.mp4> \   # optional; omit for AROM-only
   --out    <output_folder/> \
   --pose   <pose_name> \
   --side   <left|right|both> \
@@ -152,7 +152,7 @@ python scripts/run_mi4l.py \
 
 ### Examples
 
-**Knee flexion – right side, AROM + PROM:**
+**Knee flexion, right side, AROM + PROM:**
 ```bash
 python scripts/run_mi4l.py \
   --arom  data/arom/knee_flex_ra.mp4 \
@@ -163,7 +163,7 @@ python scripts/run_mi4l.py \
   --config configs/default.yaml
 ```
 
-**Shoulder flexion – AROM only, left side:**
+**Shoulder flexion, AROM only, left side:**
 ```bash
 python scripts/run_mi4l.py \
   --arom  data/arom/shoulder_la.mp4 \
@@ -173,7 +173,7 @@ python scripts/run_mi4l.py \
   --config configs/default.yaml
 ```
 
-**Bilateral leg straddle – both sides:**
+**Bilateral leg straddle, both sides:**
 ```bash
 python scripts/run_mi4l.py \
   --arom  data/arom/legSpread_arom.mp4 \
@@ -217,7 +217,7 @@ Open `scripts/run_all.py` and edit the `POSES` list near the top. Each entry map
 If `run_all.py` picks the wrong Python interpreter, set `PYTHON_OVERRIDE` at the top of the file to the full path of your interpreter:
 
 ```python
-# scripts/run_all.py  – line ~88
+# scripts/run_all.py, line ~88
 PYTHON_OVERRIDE = r"C:\Users\you\anaconda3\envs\mi4l\python.exe"
 ```
 
@@ -266,12 +266,12 @@ All output files are written to the folder specified by `--out`:
 | `arom_deg` | float | Active Range of Motion peak (degrees), top-k mean |
 | `prom_deg` | float | Passive Range of Motion peak (degrees), top-k mean |
 | `mi4l` | float | Mobility Index for Longevity: `(PROM − AROM) / PROM` |
-| `arom_confidence` | float | Estimation confidence for AROM (0–1) |
-| `prom_confidence` | float | Estimation confidence for PROM (0–1) |
+| `arom_confidence` | float | Estimation confidence for AROM (0 to 1) |
+| `prom_confidence` | float | Estimation confidence for PROM (0 to 1) |
 | `mi4l_valid` | bool | Whether the MI4L score passed all validation checks |
 | `qc_flags` | string | Semicolon-separated quality control flags |
 | **Derived metric** | | |
-| `assist_gap` | float | `prom_deg − arom_deg` — passive capacity beyond active control |
+| `assist_gap` | float | `prom_deg − arom_deg`: passive capacity beyond active control |
 | **End-range quality** | | |
 | `peak_hold_time_s` | float | Longest consecutive time (s) within 2% of peak value |
 | `peak_band_std_deg` | float | Std deviation (°) of angles within the near-peak band |
@@ -293,26 +293,26 @@ All output files are written to the folder specified by `--out`:
 
 | Section | Key | Default | Description |
 |---|---|---|---|
-| `pose` | `model_complexity` | `1` | MediaPipe model complexity (0 = fastest, 2 = most accurate) |
+| `pose` | `model_complexity` | `1` | MediaPipe model complexity; 0 = fastest, 2 = most accurate |
 | `pose` | `min_detection_confidence` | `0.5` | Minimum detection confidence |
 | `pose` | `frame_stride` | `1` | Process every N-th frame (increase to speed up at cost of resolution) |
 | `qc` | `landmark_visibility_threshold` | `0.5` | Min MediaPipe visibility score to treat a frame as valid |
 | `qc` | `min_bbox_height_px` | `150` | Minimum subject height in pixels (smaller = subject too far away) |
-| `qc` | `derivative_deg_per_sec_max` | `600` | Max angle change rate; frames exceeding this are rejected |
+| `qc` | `derivative_deg_per_sec_max` | `600` | Max angle change rate: frames exceeding this are rejected |
 | `smoothing` | `method` | `median` | Smoothing method: `none`, `median`, or `savgol` |
 | `robust_max` | `topk_percent` | `0.10` | Fraction of frames used for the top-K peak estimate |
-| `mi4l` | `side` | `left` | Default side when `--side` is not passed on CLI |
+| `mi4l` | `side` | `left` | Default side when `--side` is not passed via CLI |
 | `export` | `save_snapshots` | `true` | Save annotated best-frame images |
-| `export › plots` | `enabled` | `true` | Generate angle-over-time plots |
+| `export > plots` | `enabled` | `true` | Generate angle-over-time plots |
 
 ---
 
 ## How it works
 
-1. **Landmark extraction** — MediaPipe Pose detects 33 body landmarks per frame from the RGB video.
-2. **Angle computation** — Pose-specific geometry converts landmarks into joint angles (or normalised distances for the stick pass-through).
-3. **Quality control** — Frames are filtered by landmark visibility, subject size, clipping, and angle derivative limits. Failing frames are excluded from estimation.
-4. **AROM / PROM estimation** — The top-K median of valid frames in the detected movement window gives a robust peak angle. A short-hold fallback handles movements that don't sustain the peak for long.
-5. **MI4L computation** — `MI4L = (PROM − AROM) / PROM`, clamped to [0, 1] and validated.
-6. **Extended metrics** — Additional biomechanical metrics (end-range quality, motor control, compensation, reliability) are computed from the same movement window.
-7. **Export** — Summary CSV, per-frame angle CSVs, angle-over-time plots, annotated snapshots, and a copy of the config are written to the output folder.
+1. **Landmark extraction**: MediaPipe Pose detects 33 body landmarks per frame from the RGB video.
+2. **Angle computation**: Pose-specific geometry converts landmarks into joint angles (or normalised distances for the stick pass-through).
+3. **Quality control**: Frames are filtered by landmark visibility, subject size, clipping, and angle derivative limits. Failing frames are excluded from estimation.
+4. **AROM / PROM estimation**: The top-K median of valid frames in the detected movement window gives a robust peak angle. A short-hold fallback handles movements that don't sustain the peak for long.
+5. **MI4L computation**: `MI4L = (PROM − AROM) / PROM`, clamped to [0, 1] and validated.
+6. **Extended metrics**: Additional biomechanical metrics (end-range quality, motor control, compensation, reliability) are computed from the same movement window.
+7. **Export**: Summary CSV, per-frame angle CSVs, angle-over-time plots, annotated snapshots, and a copy of the config are written to the output folder.

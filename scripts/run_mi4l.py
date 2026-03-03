@@ -334,9 +334,18 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                         lm_row["shoulder_midpoint_y"] = (float(lshy) + float(rshy)) / 2.0
                 except Exception:
                     pass
-                a_name = "left_ankle"
-                b_name = "pelvis_center"
-                c_name = "right_ankle"
+                if "hip_extension" in metric_base or "hip_extension" in pose_name:
+                    a_name = "left_knee"
+                    b_name = "pelvis_center"
+                    c_name = "right_knee"
+                elif "trunk_extension" in metric_base or "trunk" in metric_base:
+                    a_name = "hip_midpoint"
+                    b_name = "shoulder_midpoint"
+                    c_name = "nose"
+                else:
+                    a_name = "left_ankle"
+                    b_name = "pelvis_center"
+                    c_name = "right_ankle"
                 snap_mode = "auto"
             
             # Output filename

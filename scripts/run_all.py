@@ -57,10 +57,10 @@ POSES = [
     },
     {
         "name": "unilateral_hip_extension",
-        "arom": "data/arom/hip_extension_ra.mp4",
-        "prom": "data/prom/hip_extension_rp.mp4",
+        "arom": "data/arom/hip_extension_larom.mp4",
+        "prom": "data/prom/hip_extension_lprom.mp4",
         "out":  "results/unilateral_hip_extension",
-        "side": "right",
+        "side": "left",
     },
     {
         "name": "shoulder_flexion",
