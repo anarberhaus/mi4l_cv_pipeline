@@ -104,7 +104,7 @@ def _display_name(pose_key: str) -> str:
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="MI4L Movement Analysis",
-    page_icon="�",
+    page_icon="🩺",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -130,9 +130,51 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
 /* ── Global background tint ───────────────────────────────── */
 .stApp {
-    background: radial-gradient(ellipse at 20% 0%, rgba(45,212,191,0.04) 0%, transparent 60%),
-                radial-gradient(ellipse at 80% 100%, rgba(245,158,11,0.03) 0%, transparent 60%);
+    background-color: #030303 !important;
+    background-image: 
+        radial-gradient(ellipse at 20% 0%, rgba(99,102,241,0.05) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 100%, rgba(244,63,94,0.05) 0%, transparent 60%) !important;
 }
+
+/* ── Hero Geometric Animations ────────────────────────────── */
+@keyframes float {
+    0%, 100% { transform: translateY(0px) rotate(var(--rot)); }
+    50% { transform: translateY(15px) rotate(var(--rot)); }
+}
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.elegant-shape {
+    position: absolute;
+    border-radius: 9999px;
+    backdrop-filter: blur(2px);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
+    animation: float 12s infinite ease-in-out;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.elegant-shape::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.2), transparent 70%);
+}
+
+.hero-fade-up {
+    animation: fadeUp 1s cubic-bezier(0.25, 0.4, 0.25, 1) forwards;
+    opacity: 0;
+}
+.hero-delay-0 { animation-delay: 0.5s; }
+.hero-delay-1 { animation-delay: 0.7s; }
+.hero-delay-2 { animation-delay: 0.9s; }
+
 
 /* ── Pose tile buttons ────────────────────────────────────── */
 .stButton > button {
@@ -279,31 +321,33 @@ def _go(screen: str, **extra):
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_landing():
     st.markdown("")
-    col_l, col_c, col_r = st.columns([1, 3, 1])
-    with col_c:
-        st.markdown(
-            "<h1 style='text-align:center; font-size:2.6rem; font-weight:700; "
-            "background: linear-gradient(135deg, #2dd4bf 0%, #f59e0b 100%); "
-            "-webkit-background-clip:text; -webkit-text-fill-color:transparent;'>"
-            "MI4L Movement Analysis</h1>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<p style='text-align:center; color:#8899a6; font-size:1rem; "
-            "max-width:520px; margin:0 auto 0.5rem auto; line-height:1.6;'>"
-            "Biomechanical range-of-motion assessment powered by computer vision."
-            "<br>Upload AROM &amp; PROM videos to generate your mobility report.</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<p style='text-align:center; margin-bottom:2rem;'>"
-            "<span style='display:inline-block; padding:0.3rem 0.9rem; "
-            "border-radius:20px; font-size:0.75rem; font-weight:600; "
-            "background:rgba(45,212,191,0.1); color:#2dd4bf; "
-            "border:1px solid rgba(45,212,191,0.25);'>"
-            "🧘 Select a pose to begin</span></p>",
-            unsafe_allow_html=True,
-        )
+    # Animated geometric hero
+    st.markdown(
+        """<div style="position: relative; width: 100%; min-height: 48vh; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-top: -2rem; margin-bottom: 2rem;">
+<!-- Floating Shapes Background -->
+<div style="position: absolute; inset: 0; overflow: hidden; pointer-events: none;">
+<div class="elegant-shape" style="--rot: 12deg; width: 600px; height: 140px; background: linear-gradient(to right, rgba(99,102,241,0.15), transparent); left: -5%; top: 20%;"></div>
+<div class="elegant-shape" style="--rot: -15deg; width: 500px; height: 120px; background: linear-gradient(to right, rgba(244,63,94,0.15), transparent); right: 0%; top: 75%; animation-delay: 0.5s;"></div>
+<div class="elegant-shape" style="--rot: 20deg; width: 200px; height: 60px; background: linear-gradient(to right, rgba(245,158,11,0.15), transparent); right: 20%; top: 15%; animation-delay: 0.6s;"></div>
+</div>
+<!-- Text Content -->
+<div style="position: relative; z-index: 10; text-align: center; max-width: 800px; padding: 0 1rem;">
+<div class="hero-fade-up hero-delay-0" style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 9999px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 2rem;">
+<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgba(244,63,94,0.8); margin-top: auto; margin-bottom: auto;"></span>
+<span style="font-size: 0.875rem; color: rgba(255,255,255,0.6); letter-spacing: 0.025em;">MI4L Clinical Tool</span>
+</div>
+<h1 class="hero-fade-up hero-delay-1" style="font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 700; line-height: 1.1; margin-bottom: 1.5rem; letter-spacing: -0.025em; text-align: center;">
+<span style="background: linear-gradient(to bottom, #ffffff, rgba(255,255,255,0.8)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Elevate Your</span>
+<br/>
+<span style="background: linear-gradient(to right, #a5b4fc, rgba(255,255,255,0.9), #fda4af); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Movement Vision</span>
+</h1>
+<p class="hero-fade-up hero-delay-2" style="font-size: clamp(1rem, 2vw, 1.15rem); color: rgba(255,255,255,0.4); font-weight: 300; letter-spacing: 0.025em; line-height: 1.6; max-width: 500px; margin: 0 auto; text-align: center;">
+Biomechanical range-of-motion assessment powered by computer vision. Select a pose to begin your analysis.
+</p>
+</div>
+</div>""", 
+        unsafe_allow_html=True
+    )
 
     # ── Pose grid (4 + 3) ───────────────────────────────────
     row1_keys = POSE_KEYS[:4]
