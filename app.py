@@ -72,91 +72,174 @@ BILATERAL_POSES = {"prone_trunk_extension", "bilateral_leg_straddle", "shoulder_
 
 POSE_KEYS = list(POSE_METADATA.keys())  # deterministic order
 
-POSE_ICONS = {
-    "kneeling_knee_flexion":        "🦵",
-    "prone_trunk_extension":        "🔄",
-    "standing_hip_abduction":       "🦿",
-    "bilateral_leg_straddle":       "🤸",
-    "unilateral_hip_extension":     "🏃",
-    "shoulder_flexion":             "💪",
-    "shoulder_stick_pass_through":  "🏋️",
+# Pose illustration images (generated, consistent branding)
+_ASSETS_DIR = _PROJECT_ROOT / "assets" / "poses"
+POSE_IMAGES = {
+    "kneeling_knee_flexion":        _ASSETS_DIR / "lunge.png",
+    "prone_trunk_extension":        _ASSETS_DIR / "cobra.png",
+    "standing_hip_abduction":       _ASSETS_DIR / "hand_to_toe.png",
+    "bilateral_leg_straddle":       _ASSETS_DIR / "side_splits.png",
+    "unilateral_hip_extension":     _ASSETS_DIR / "front_splits.png",
+    "shoulder_flexion":             _ASSETS_DIR / "shoulder_flexion.png",
+    "shoulder_stick_pass_through":  _ASSETS_DIR / "shoulder_extension.png",
 }
+
+# Official display names from the MI4L poses reference (poses.pdf)
+POSE_DISPLAY_NAMES = {
+    "kneeling_knee_flexion":        "Lunge Pose",
+    "prone_trunk_extension":        "Cobra Pose",
+    "standing_hip_abduction":       "Extended Hand to Big Toe Pose",
+    "bilateral_leg_straddle":       "Side Splits",
+    "unilateral_hip_extension":     "Front Splits",
+    "shoulder_flexion":             "Shoulder Flexion",
+    "shoulder_stick_pass_through":  "Shoulder Extension",
+}
+
+def _display_name(pose_key: str) -> str:
+    """Return the official display name for a pose, with fallback to POSE_METADATA."""
+    return POSE_DISPLAY_NAMES.get(pose_key, POSE_METADATA.get(pose_key, {}).get("movement_name", pose_key))
 
 # ---------------------------------------------------------------------------
 # Page config & custom CSS
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="MI4L Movement Analysis",
-    page_icon="🩺",
+    page_icon="�",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
 <style>
-/* ── Global ────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* ── Typography ───────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
-/* ── Landing pose cards ───────────────────────────────────── */
-div.pose-card {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border: 1px solid #334155;
-    border-radius: 14px;
-    padding: 1.5rem 1.2rem;
-    text-align: center;
-    transition: all 0.25s ease;
-    min-height: 190px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+/* ── Accent colours ───────────────────────────────────────── */
+:root {
+    --accent-teal: #2dd4bf;
+    --accent-amber: #f59e0b;
+    --accent-coral: #fb7185;
+    --bg-card: linear-gradient(145deg, #1a1f2e 0%, #0d1117 100%);
+    --border-subtle: rgba(45,212,191,0.15);
+    --border-hover: rgba(45,212,191,0.5);
+    --text-primary: #f0f4f8;
+    --text-secondary: #8899a6;
 }
-div.pose-card:hover {
-    border-color: #60a5fa;
-    box-shadow: 0 0 20px rgba(96,165,250,0.15);
-    transform: translateY(-2px);
+
+/* ── Global background tint ───────────────────────────────── */
+.stApp {
+    background: radial-gradient(ellipse at 20% 0%, rgba(45,212,191,0.04) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 100%, rgba(245,158,11,0.03) 0%, transparent 60%);
 }
-div.pose-card .icon { font-size: 2.2rem; margin-bottom: 0.5rem; }
-div.pose-card .name {
-    font-weight: 600; font-size: 0.95rem; color: #f1f5f9;
-    margin-bottom: 0.35rem;
+
+/* ── Pose tile buttons ────────────────────────────────────── */
+.stButton > button {
+    border-radius: 14px !important;
+    font-weight: 500 !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    border: 1px solid var(--border-subtle) !important;
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    min-height: 150px !important;
 }
-div.pose-card .meta {
-    font-size: 0.75rem; color: #94a3b8;
-    line-height: 1.4;
+.stButton > button:hover {
+    border-color: var(--border-hover) !important;
+    box-shadow: 0 4px 24px rgba(45,212,191,0.12), 0 0 0 1px rgba(45,212,191,0.2) !important;
+    transform: translateY(-2px) !important;
+}
+.stButton > button:active {
+    transform: translateY(0) !important;
+}
+
+/* ── Primary action button (Run Analysis) ─────────────────── */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 50%, #0d9488 100%) !important;
+    color: #042f2e !important;
+    font-weight: 700 !important;
+    border: none !important;
+    min-height: auto !important;
+    padding: 0.8rem 2rem !important;
+    font-size: 1.05rem !important;
+    letter-spacing: 0.02em !important;
+}
+.stButton > button[kind="primary"]:hover {
+    box-shadow: 0 6px 30px rgba(45,212,191,0.3) !important;
+    transform: translateY(-1px) !important;
 }
 
 /* ── Metric cards ─────────────────────────────────────────── */
-div.metric-group {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border: 1px solid #334155;
-    border-radius: 14px;
-    padding: 1.3rem;
+[data-testid="stMetric"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 1rem;
 }
-div.metric-group h4 {
-    color: #60a5fa;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 0.8rem;
+[data-testid="stMetric"] label {
+    color: var(--text-secondary) !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
 }
-
-/* ── Buttons ──────────────────────────────────────────────── */
-.stButton > button {
-    border-radius: 10px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: var(--accent-teal) !important;
+    font-family: 'Outfit', sans-serif !important;
+    font-weight: 600 !important;
 }
 
 /* ── Section headers ──────────────────────────────────────── */
 .section-header {
-    font-size: 1.1rem;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
     font-weight: 600;
-    color: #f1f5f9;
-    margin: 1.5rem 0 0.8rem 0;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid #334155;
+    color: var(--text-primary);
+    margin: 2rem 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ── Info / success / error boxes ─────────────────────────── */
+.stAlert {
+    border-radius: 12px !important;
+}
+
+/* ── Progress bars ────────────────────────────────────────── */
+.stProgress > div > div {
+    background: linear-gradient(90deg, var(--accent-teal), var(--accent-amber)) !important;
+    border-radius: 8px !important;
+}
+
+/* ── Expander styling ─────────────────────────────────────── */
+.streamlit-expanderHeader {
+    font-weight: 600 !important;
+    color: var(--text-secondary) !important;
+}
+
+/* ── Download buttons ─────────────────────────────────────── */
+.stDownloadButton > button {
+    background: transparent !important;
+    border: 1px solid var(--border-subtle) !important;
+    color: var(--accent-teal) !important;
+    min-height: auto !important;
+    font-size: 0.85rem !important;
+}
+.stDownloadButton > button:hover {
+    background: rgba(45,212,191,0.08) !important;
+    border-color: var(--border-hover) !important;
+}
+
+/* ── Video uploader area ──────────────────────────────────── */
+[data-testid="stFileUploader"] {
+    border-radius: 12px;
+}
+
+/* ── Dividers ─────────────────────────────────────────────── */
+hr {
+    border-color: var(--border-subtle) !important;
 }
 
 /* ── Hide default Streamlit UI chrome ─────────────────────── */
@@ -195,19 +278,30 @@ def _go(screen: str, **extra):
 # ║  SCREEN 1 — LANDING                                        ║
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_landing():
-    st.markdown("")  # spacer
+    st.markdown("")
     col_l, col_c, col_r = st.columns([1, 3, 1])
     with col_c:
         st.markdown(
-            "<h1 style='text-align:center; font-size:2.4rem; "
-            "background: linear-gradient(90deg,#60a5fa,#a78bfa); "
+            "<h1 style='text-align:center; font-size:2.6rem; font-weight:700; "
+            "background: linear-gradient(135deg, #2dd4bf 0%, #f59e0b 100%); "
             "-webkit-background-clip:text; -webkit-text-fill-color:transparent;'>"
             "MI4L Movement Analysis</h1>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p style='text-align:center; color:#94a3b8; font-size:1.05rem; margin-bottom:2.2rem;'>"
-            "Upload AROM and PROM videos to generate biomechanical analysis.</p>",
+            "<p style='text-align:center; color:#8899a6; font-size:1rem; "
+            "max-width:520px; margin:0 auto 0.5rem auto; line-height:1.6;'>"
+            "Biomechanical range-of-motion assessment powered by computer vision."
+            "<br>Upload AROM &amp; PROM videos to generate your mobility report.</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align:center; margin-bottom:2rem;'>"
+            "<span style='display:inline-block; padding:0.3rem 0.9rem; "
+            "border-radius:20px; font-size:0.75rem; font-weight:600; "
+            "background:rgba(45,212,191,0.1); color:#2dd4bf; "
+            "border:1px solid rgba(45,212,191,0.25);'>"
+            "🧘 Select a pose to begin</span></p>",
             unsafe_allow_html=True,
         )
 
@@ -219,19 +313,20 @@ def _render_landing():
         cols = st.columns(len(keys), gap="medium")
         for col, key in zip(cols, keys):
             meta = POSE_METADATA[key]
-            icon = POSE_ICONS.get(key, "🔬")
+            display_name = _display_name(key)
             bilateral = key in BILATERAL_POSES
             side_label = "Bilateral" if bilateral else "Unilateral"
             with col:
-                st.markdown(
-                    f"""<div class="pose-card">
-                        <div class="icon">{icon}</div>
-                        <div class="name">{meta['movement_name']}</div>
-                        <div class="meta">{meta['joint_name'].title()} · {meta['angle_type']}<br>{side_label}</div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
-                if st.button("Select", key=f"sel_{key}", use_container_width=True):
+                # Show pose illustration above the button
+                img_path = POSE_IMAGES.get(key)
+                if img_path and img_path.exists():
+                    st.image(str(img_path), use_container_width=True)
+                # Clickable card button
+                if st.button(
+                    f"**{display_name}**\n\n{meta['joint_name'].title()}  ·  {side_label}",
+                    key=f"sel_{key}",
+                    use_container_width=True,
+                ):
                     default_side = "both" if bilateral else "right"
                     _go("upload", selected_pose=key, selected_side=default_side)
                     st.rerun()
@@ -258,7 +353,7 @@ def _render_upload():
         st.rerun()
 
     st.markdown(
-        f"<h2 style='margin-bottom:0.2rem;'>{POSE_ICONS.get(pose_key, '')} {meta.get('movement_name', pose_key)}</h2>",
+        f"<h2 style='margin-bottom:0.2rem;'>{_display_name(pose_key)}</h2>",
         unsafe_allow_html=True,
     )
     tag_col1, tag_col2, tag_col3 = st.columns(3)
@@ -284,34 +379,52 @@ def _render_upload():
     st.markdown("")
 
     # ── File uploaders ──────────────────────────────────────
-    col_a, col_p = st.columns(2)
+    is_stick_pass = pose_key == "shoulder_stick_pass_through"
 
-    with col_a:
-        st.markdown("##### AROM Video *")
+    if is_stick_pass:
+        # Shoulder extension uses a single video (no AROM/PROM split)
+        st.markdown("##### Video *")
         arom = st.file_uploader(
-            "Upload AROM video",
+            "Upload video",
             type=["mp4", "mov", "avi"],
             key="upload_arom",
             label_visibility="collapsed",
         )
+        prom = None  # not applicable
         if arom:
             st.video(arom)
+    else:
+        col_a, col_p = st.columns(2)
 
-    with col_p:
-        st.markdown("##### PROM Video (optional)")
-        prom = st.file_uploader(
-            "Upload PROM video",
-            type=["mp4", "mov", "avi"],
-            key="upload_prom",
-            label_visibility="collapsed",
-        )
-        if prom:
-            st.video(prom)
+        with col_a:
+            st.markdown("##### AROM Video *")
+            arom = st.file_uploader(
+                "Upload AROM video",
+                type=["mp4", "mov", "avi"],
+                key="upload_arom",
+                label_visibility="collapsed",
+            )
+            if arom:
+                st.video(arom)
+
+        with col_p:
+            st.markdown("##### PROM Video *")
+            prom = st.file_uploader(
+                "Upload PROM video",
+                type=["mp4", "mov", "avi"],
+                key="upload_prom",
+                label_visibility="collapsed",
+            )
+            if prom:
+                st.video(prom)
 
     st.markdown("")
 
     # ── Run button ──────────────────────────────────────────
-    run_disabled = arom is None
+    if is_stick_pass:
+        run_disabled = arom is None
+    else:
+        run_disabled = arom is None or prom is None
     if st.button(
         "🚀  Run Analysis",
         use_container_width=True,
@@ -354,7 +467,7 @@ def _render_processing():
     has_prom = st.session_state.prom_file is not None
 
     st.markdown(
-        f"<h2 style='margin-bottom:0.3rem;'>Analysing: {meta.get('movement_name', pose_key)}</h2>",
+        f"<h2 style='margin-bottom:0.3rem;'>Analysing: {_display_name(pose_key)}</h2>",
         unsafe_allow_html=True,
     )
     st.caption(f"Side: **{side.title()}**")
@@ -531,7 +644,7 @@ def _render_results():
     head_left, head_right = st.columns([3, 1])
     with head_left:
         st.markdown(
-            f"<h2>{POSE_ICONS.get(pose_key, '')} Results — {meta.get('movement_name', pose_key)}</h2>",
+            f"<h2>Results — {_display_name(pose_key)}</h2>",
             unsafe_allow_html=True,
         )
     with head_right:

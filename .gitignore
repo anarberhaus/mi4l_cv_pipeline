@@ -2,8 +2,20 @@
 data/
 results_testing/
 results/
+xx/
+
+# scratch / debug scripts
+debug_landmarks.py
+temp.py
 prompt.md
+
+# batch files
 run_all_poses.bat
+
+# reference docs (large binary)
+poses.pdf
+
+# video files
 *.mp4
 *.mov
 *.avi
@@ -13,6 +25,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 
 # venv / env
 .venv/
@@ -25,5 +38,3 @@ Thumbs.db
 
 # logs
 *.log
-
-*.egg-info/
