@@ -176,23 +176,62 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 .hero-delay-2 { animation-delay: 0.9s; }
 
 
-/* ── Pose tile buttons ────────────────────────────────────── */
-.stButton > button {
+/* ── Unified Pose Cards (Container mapping) ─────────────────── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    position: relative !important;
+    background-color: #0d1117 !important;
     border-radius: 14px !important;
-    font-weight: 500 !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     border: 1px solid var(--border-subtle) !important;
-    background: var(--bg-card) !important;
-    color: var(--text-primary) !important;
-    min-height: 150px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
-.stButton > button:hover {
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
     border-color: var(--border-hover) !important;
     box-shadow: 0 4px 24px rgba(45,212,191,0.12), 0 0 0 1px rgba(45,212,191,0.2) !important;
     transform: translateY(-2px) !important;
 }
-.stButton > button:active {
-    transform: translateY(0) !important;
+[data-testid="stVerticalBlockBorderWrapper"] > div {
+    gap: 0 !important; /* Remove gap between image and text */
+}
+
+/* Base image styling inside cards */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stImage"] {
+    margin-bottom: -10px !important;
+}
+
+/* Invisible overlay button to make entire card clickable */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButton"] {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 10 !important;
+    opacity: 0 !important; /* Fully invisible but clickable */
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButton"] button {
+    width: 100% !important;
+    height: 100% !important;
+    cursor: pointer !important;
+}
+
+/* Custom internal card text */
+.card-info {
+    padding: 0.5rem 1rem 1.5rem 1rem;
+    text-align: center;
+}
+.card-info h4 {
+    margin: 0 0 0.3rem 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: 'Outfit', sans-serif;
+}
+.card-info p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
 }
 
 /* ── Primary action button (Run Analysis) ─────────────────── */
@@ -361,19 +400,28 @@ Biomechanical range-of-motion assessment powered by computer vision. Select a po
             bilateral = key in BILATERAL_POSES
             side_label = "Bilateral" if bilateral else "Unilateral"
             with col:
-                # Show pose illustration above the button
-                img_path = POSE_IMAGES.get(key)
-                if img_path and img_path.exists():
-                    st.image(str(img_path), use_container_width=True)
-                # Clickable card button
-                if st.button(
-                    f"**{display_name}**\n\n{meta['joint_name'].title()}  ·  {side_label}",
-                    key=f"sel_{key}",
-                    use_container_width=True,
-                ):
-                    default_side = "both" if bilateral else "right"
-                    _go("upload", selected_pose=key, selected_side=default_side)
-                    st.rerun()
+                with st.container(border=True):
+                    # Show pose illustration (takes up top half of card)
+                    img_path = POSE_IMAGES.get(key)
+                    if img_path and img_path.exists():
+                        st.image(str(img_path), use_container_width=True)
+                        
+                    # Custom styled text matching the new design
+                    st.markdown(
+                        f"""
+                        <div class="card-info">
+                            <h4>{display_name}</h4>
+                            <p>{meta['joint_name'].title()} · {side_label}</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                        
+                    # Invisible overlay button to capture clicks for the entire card
+                    if st.button("Select", key=f"sel_{key}", use_container_width=True):
+                        default_side = "both" if bilateral else "right"
+                        _go("upload", selected_pose=key, selected_side=default_side)
+                        st.rerun()
 
     _pose_row(row1_keys)
     st.markdown("")  # gap
