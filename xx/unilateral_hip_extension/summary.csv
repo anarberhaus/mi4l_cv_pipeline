@@ -1,3 +1,0 @@
-joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
-unilateral_hip_extension,left,11.082782538491077,75.45873807821498,0.8531279104216735,1.0,1.0,True,
-unilateral_hip_extension,right,67.50770191126381,23.33803872202628,,1.0,1.0,False,mi4l:prom_lt_arom:23.338+2.000<67.508

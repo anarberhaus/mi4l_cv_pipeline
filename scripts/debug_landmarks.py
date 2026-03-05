@@ -5,13 +5,13 @@ import numpy as np
 # Load a specific frame's landmarks and print coordinates
 
 # This would be used to verify what the landmark detector is actually seeing
-# Usage: python debug_landmarks.py <path_to_landmarks_csv> <frame_number>
+# Usage: python scripts/debug_landmarks.py <path_to_landmarks_csv> <frame_number>
 
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 3:
-        print("Usage: python debug_landmarks.py <landmarks_csv> <frame_idx>")
+        print("Usage: python scripts/debug_landmarks.py <landmarks_csv> <frame_idx>")
         sys.exit(1)
     
     csv_path = sys.argv[1]

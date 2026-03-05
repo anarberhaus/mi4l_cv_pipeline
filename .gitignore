@@ -1,16 +1,12 @@
 # data / outputs
 data/
-results_testing/
 results/
+results_testing/
 xx/
 
-# scratch / debug scripts
-debug_landmarks.py
-temp.py
-prompt.md
-
-# batch files
-run_all_poses.bat
+# scratch / docs
+scratch/
+docs/
 
 # reference docs (large binary)
 poses.pdf
@@ -22,6 +18,7 @@ poses.pdf
 
 # python junk
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
