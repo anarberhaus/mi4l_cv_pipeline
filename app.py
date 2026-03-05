@@ -118,12 +118,12 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
 /* ── Accent colours ───────────────────────────────────────── */
 :root {
-    --accent-teal: #2dd4bf;
-    --accent-amber: #f59e0b;
+    --accent-teal: #6366f1; /* Now Indigo */
+    --accent-amber: #f43f5e; /* Now Rose */
     --accent-coral: #fb7185;
     --bg-card: linear-gradient(145deg, #1a1f2e 0%, #0d1117 100%);
-    --border-subtle: rgba(45,212,191,0.15);
-    --border-hover: rgba(45,212,191,0.5);
+    --border-subtle: rgba(99,102,241,0.15);
+    --border-hover: rgba(99,102,241,0.5);
     --text-primary: #f0f4f8;
     --text-secondary: #8899a6;
 }
@@ -188,7 +188,7 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover {
     border-color: var(--border-hover) !important;
-    box-shadow: 0 4px 24px rgba(45,212,191,0.12), 0 0 0 1px rgba(45,212,191,0.2) !important;
+    box-shadow: 0 4px 24px rgba(99,102,241,0.12), 0 0 0 1px rgba(99,102,241,0.2) !important;
     transform: translateY(-2px) !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"] > div {
@@ -218,26 +218,31 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
 /* Custom internal card text */
 .card-info {
-    padding: 0.5rem 1rem 1.5rem 1rem;
+    padding: 0.5rem 1rem 1.0rem 1rem;
     text-align: center;
+    height: 90px; /* Force locked height so cards align perfectly */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 .card-info h4 {
-    margin: 0 0 0.3rem 0;
-    font-size: 1.05rem;
+    margin: 0 0 0.4rem 0;
+    font-size: 1.0rem;
     font-weight: 600;
     color: var(--text-primary);
     font-family: 'Outfit', sans-serif;
+    line-height: 1.2;
 }
 .card-info p {
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     color: var(--text-secondary);
 }
 
 /* ── Primary action button (Run Analysis) ─────────────────── */
 .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 50%, #0d9488 100%) !important;
-    color: #042f2e !important;
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%) !important;
+    color: #ffffff !important;
     font-weight: 700 !important;
     border: none !important;
     min-height: auto !important;
