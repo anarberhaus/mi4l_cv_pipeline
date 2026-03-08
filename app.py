@@ -343,6 +343,7 @@ _DEFAULTS = {
     "screen":       "landing",
     "selected_pose": None,
     "selected_side": "right",
+    "is_full_session": False,
     "arom_file":     None,
     "prom_file":     None,
     "results_dir":   None,
@@ -440,15 +441,39 @@ Biomechanical range-of-motion assessment powered by computer vision. Select a po
 # ║  SCREEN 2 — UPLOAD                                         ║
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_upload():
-    pose_key = st.session_state.selected_pose
+    # ── Sidebar Configuration ───────────────────────────────
+    st.sidebar.markdown("### Configuration")
+    
+    # Pose Selector
+    pose_options = {key: _display_name(key) for key in POSE_KEYS}
+    selected_pose_name = st.sidebar.selectbox(
+        "Movement Type",
+        options=list(pose_options.values()),
+        index=list(pose_options.keys()).index(st.session_state.selected_pose) if st.session_state.selected_pose in pose_options else 0
+    )
+    # Reverse lookup for pose_key
+    pose_key = next((k for k, v in pose_options.items() if v == selected_pose_name), st.session_state.selected_pose)
+    st.session_state.selected_pose = pose_key
+    
     meta = POSE_METADATA.get(pose_key, {})
     bilateral = pose_key in BILATERAL_POSES
 
-    # Back button
-    if st.button("← Back to poses"):
+    # Side Selector
+    if not bilateral:
+        side_options = ["Left", "Right"]
+        side_idx = 0 if st.session_state.selected_side == "left" else 1
+        side = st.sidebar.radio("Side", side_options, index=side_idx)
+        st.session_state.selected_side = side.lower()
+    else:
+        st.sidebar.info("This is a bilateral pose — both sides are analysed automatically.")
+        st.session_state.selected_side = "both"
+
+    # Back button to landing
+    if st.sidebar.button("← Back to Landing", use_container_width=True):
         _go("landing")
         st.rerun()
 
+    # ── Main Area ───────────────────────────────────────────
     st.markdown(
         f"<h2 style='margin-bottom:0.2rem;'>{_display_name(pose_key)}</h2>",
         unsafe_allow_html=True,
@@ -460,78 +485,82 @@ def _render_upload():
 
     st.divider()
 
-    # ── Side selector (unilateral only) ─────────────────────
-    if not bilateral:
-        side = st.radio(
-            "Side",
-            ["Left", "Right"],
-            index=0 if st.session_state.selected_side == "left" else 1,
-            horizontal=True,
-        )
-        st.session_state.selected_side = side.lower()
-    else:
-        st.session_state.selected_side = "both"
-        st.info("This is a bilateral pose — both sides are analysed automatically.")
-
-    st.markdown("")
+    # ── Tabs for Analysis Mode ──────────────────────────────
+    tab_single, tab_session = st.tabs(["Single Video", "Full Session"])
 
     # ── File uploaders ──────────────────────────────────────
     is_stick_pass = pose_key == "shoulder_stick_pass_through"
 
-    if is_stick_pass:
-        # Shoulder extension uses a single video (no AROM/PROM split)
-        st.markdown("##### Video *")
-        arom = st.file_uploader(
-            "Upload video",
+    with tab_single:
+        st.markdown("##### Upload Video")
+        single_arom = st.file_uploader(
+            "Upload raw AROM video",
             type=["mp4", "mov", "avi"],
-            key="upload_arom",
+            key="upload_single",
             label_visibility="collapsed",
         )
-        prom = None  # not applicable
-        if arom:
-            st.video(arom)
-    else:
-        col_a, col_p = st.columns(2)
+        if single_arom:
+            st.video(single_arom)
 
-        with col_a:
-            st.markdown("##### AROM Video *")
-            arom = st.file_uploader(
-                "Upload AROM video",
-                type=["mp4", "mov", "avi"],
-                key="upload_arom",
-                label_visibility="collapsed",
-            )
-            if arom:
-                st.video(arom)
+        st.markdown("")
+        run_single_disabled = single_arom is None
+        if st.button(
+            "🚀  Run Single Analysis",
+            use_container_width=True,
+            disabled=run_single_disabled,
+            type="primary",
+            key="run_single_btn"
+        ):
+            st.session_state.is_full_session = False
+            st.session_state.arom_file = single_arom
+            st.session_state.prom_file = None
+            _go("processing")
+            st.rerun()
 
-        with col_p:
-            st.markdown("##### PROM Video *")
-            prom = st.file_uploader(
-                "Upload PROM video",
-                type=["mp4", "mov", "avi"],
-                key="upload_prom",
-                label_visibility="collapsed",
-            )
-            if prom:
-                st.video(prom)
+    with tab_session:
+        st.info("Full Session computes both Active and Passive ranges to calculate the MI4L capacity score.")
+        
+        if is_stick_pass:
+            st.warning("Shoulder Extension uses a single test methodology. Please use the Single Video tab.")
+        else:
+            col_a, col_p = st.columns(2)
 
-    st.markdown("")
+            with col_a:
+                st.markdown("##### AROM Video *")
+                session_arom = st.file_uploader(
+                    "Upload AROM video",
+                    type=["mp4", "mov", "avi"],
+                    key="upload_session_arom",
+                    label_visibility="collapsed",
+                )
+                if session_arom:
+                    st.video(session_arom)
 
-    # ── Run button ──────────────────────────────────────────
-    if is_stick_pass:
-        run_disabled = arom is None
-    else:
-        run_disabled = arom is None or prom is None
-    if st.button(
-        "🚀  Run Analysis",
-        use_container_width=True,
-        disabled=run_disabled,
-        type="primary",
-    ):
-        st.session_state.arom_file = arom
-        st.session_state.prom_file = prom
-        _go("processing")
-        st.rerun()
+            with col_p:
+                st.markdown("##### PROM Video *")
+                session_prom = st.file_uploader(
+                    "Upload PROM video",
+                    type=["mp4", "mov", "avi"],
+                    key="upload_session_prom",
+                    label_visibility="collapsed",
+                )
+                if session_prom:
+                    st.video(session_prom)
+
+            st.markdown("")
+            run_session_disabled = session_arom is None or session_prom is None
+            if st.button(
+                "🚀  Run Full Session",
+                use_container_width=True,
+                disabled=run_session_disabled,
+                type="primary",
+                key="run_session_btn"
+            ):
+                st.session_state.is_full_session = True
+                st.session_state.arom_file = session_arom
+                st.session_state.prom_file = session_prom
+                _go("processing")
+                st.rerun()
 
 
 # ╔═════════════════════════════════════════════════════════════╗
@@ -570,18 +599,30 @@ def _render_processing():
     st.caption(f"Side: **{side.title()}**")
 
     # ── Write uploaded files to temp dir ────────────────────
-    tmp_root = Path(tempfile.mkdtemp(prefix="mi4l_ui_"))
-    input_dir = tmp_root / "input"
-    input_dir.mkdir()
-    out_dir = tmp_root / "output"
-    out_dir.mkdir()
+    
+    # Modify Output path based on session vs single
+    if st.session_state.is_full_session:
+        # Full Session Output
+        stamp = int(time.time())
+        out_dir = _PROJECT_ROOT / "results" / "sessions" / f"{pose_key}_{stamp}"
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(exist_ok=True)
+        # Use a true temporary directory for raw inputs only to avoid bloat
+        tmp_input_dir = Path(tempfile.mkdtemp(prefix="mi4l_input_"))
+    else:
+        # Temporary output for fast single iterations
+        tmp_root = Path(tempfile.mkdtemp(prefix="mi4l_ui_"))
+        tmp_input_dir = tmp_root / "input"
+        tmp_input_dir.mkdir()
+        out_dir = tmp_root / "output"
+        out_dir.mkdir()
 
-    arom_path = input_dir / "arom_video.mp4"
+    arom_path = tmp_input_dir / "arom_video.mp4"
     arom_path.write_bytes(st.session_state.arom_file.getvalue())
 
     prom_path = None
     if has_prom:
-        prom_path = input_dir / "prom_video.mp4"
+        prom_path = tmp_input_dir / "prom_video.mp4"
         prom_path.write_bytes(st.session_state.prom_file.getvalue())
 
     # ── Resolve the correct Python interpreter ──────────────
@@ -767,16 +808,29 @@ def _render_results():
         st.code(st.session_state.run_stdout or "(no output)", language="text")
 
     # ── CORE METRICS ────────────────────────────────────────
-    st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("AROM Peak", _fmt(row.get("arom_deg"), "°"))
-    c2.metric("PROM Peak", _fmt(row.get("prom_deg"), "°"))
-    c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
-    mi4l_val = row.get("mi4l")
-    mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
-    mi4l_valid = row.get("mi4l_valid", False)
-    c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
-              delta_color="normal" if mi4l_valid else "inverse")
+    if st.session_state.is_full_session:
+        st.markdown('<div class="section-header">Session Summary</div>', unsafe_allow_html=True)
+        # Using a custom UI for the Side-by-Side breakdown
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Activity Label", "AROM", delta=_fmt(row.get("arom_deg"), "°", 1), delta_color="off")
+        c2.metric("Activity Label", "PROM", delta=_fmt(row.get("prom_deg"), "°", 1), delta_color="off")
+        c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
+        mi4l_val = row.get("mi4l")
+        mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
+        mi4l_valid = row.get("mi4l_valid", False)
+        c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
+                  delta_color="normal" if mi4l_valid else "inverse")
+    else:
+        st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("AROM Peak", _fmt(row.get("arom_deg"), "°"))
+        c2.metric("PROM Peak", _fmt(row.get("prom_deg"), "°"))
+        c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
+        mi4l_val = row.get("mi4l")
+        mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
+        mi4l_valid = row.get("mi4l_valid", False)
+        c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
+                  delta_color="normal" if mi4l_valid else "inverse")
 
     # ── QUALITY METRICS ─────────────────────────────────────
     st.markdown('<div class="section-header">End-Range Quality</div>', unsafe_allow_html=True)
@@ -821,10 +875,28 @@ def _render_results():
         snap_files = sorted(snap_dir.glob("*.png"))
         if snap_files:
             st.markdown("**Snapshots**")
-            snap_cols = st.columns(min(len(snap_files), 3))
-            for i, sf in enumerate(snap_files):
-                with snap_cols[i % len(snap_cols)]:
-                    st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
+            
+            if st.session_state.is_full_session:
+                arom_snaps = [s for s in snap_files if "arom" in s.name.lower()]
+                prom_snaps = [s for s in snap_files if "prom" in s.name.lower()]
+                
+                # Pair them up
+                max_len = max(len(arom_snaps), len(prom_snaps))
+                for i in range(max_len):
+                    col_a, col_p = st.columns(2)
+                    with col_a:
+                        if i < len(arom_snaps):
+                            sf = arom_snaps[i]
+                            st.image(str(sf), caption=f"AROM: {sf.stem.replace('_', ' ').title()}", use_container_width=True)
+                    with col_p:
+                        if i < len(prom_snaps):
+                            sf = prom_snaps[i]
+                            st.image(str(sf), caption=f"PROM: {sf.stem.replace('_', ' ').title()}", use_container_width=True)
+            else:
+                snap_cols = st.columns(min(len(snap_files), 3))
+                for i, sf in enumerate(snap_files):
+                    with snap_cols[i % len(snap_cols)]:
+                        st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
 
     # ── EXPORT / DOWNLOADS ──────────────────────────────────
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
