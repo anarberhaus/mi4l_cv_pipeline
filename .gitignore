@@ -3,7 +3,7 @@ data/
 results/
 results_testing/
 xx/
-context.md/
+
 
 # scratch / docs
 scratch/
@@ -11,6 +11,7 @@ docs/
 
 # reference docs (large binary)
 poses.pdf
+context.md
 
 # video files
 *.mp4
