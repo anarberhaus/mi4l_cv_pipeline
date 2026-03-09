@@ -12,6 +12,7 @@ docs/
 # reference docs (large binary)
 poses.pdf
 context.md
+dim_images.py
 
 # video files
 *.mp4

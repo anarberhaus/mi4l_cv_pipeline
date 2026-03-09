@@ -75,13 +75,13 @@ POSE_KEYS = list(POSE_METADATA.keys())  # deterministic order
 # Pose illustration images (generated, consistent branding)
 _ASSETS_DIR = _PROJECT_ROOT / "assets" / "poses"
 POSE_IMAGES = {
-    "kneeling_knee_flexion":        _ASSETS_DIR / "lunge.png",
-    "prone_trunk_extension":        _ASSETS_DIR / "cobra.png",
-    "standing_hip_abduction":       _ASSETS_DIR / "hand_to_toe.png",
-    "bilateral_leg_straddle":       _ASSETS_DIR / "side_splits.png",
-    "unilateral_hip_extension":     _ASSETS_DIR / "front_splits.png",
-    "shoulder_flexion":             _ASSETS_DIR / "shoulder_flexion.png",
-    "shoulder_stick_pass_through":  _ASSETS_DIR / "shoulder_extension.png",
+    "kneeling_knee_flexion":        _ASSETS_DIR / "lunge_dimmed.png",
+    "prone_trunk_extension":        _ASSETS_DIR / "cobra_dimmed.png",
+    "standing_hip_abduction":       _ASSETS_DIR / "hand_to_toe_dimmed.png",
+    "bilateral_leg_straddle":       _ASSETS_DIR / "side_splits_dimmed.png",
+    "unilateral_hip_extension":     _ASSETS_DIR / "front_splits_dimmed.png",
+    "shoulder_flexion":             _ASSETS_DIR / "shoulder_flexion_dimmed.png",
+    "shoulder_stick_pass_through":  _ASSETS_DIR / "shoulder_extension_dimmed.png",
 }
 
 # Official display names from the MI4L poses reference (poses.pdf)
@@ -103,7 +103,7 @@ def _display_name(pose_key: str) -> str:
 # Page config & custom CSS
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="MI4L Movement Analysis",
+    page_title="MWI Mobility Analysis",
     page_icon="🩺",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -130,51 +130,8 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
 /* ── Global background tint ───────────────────────────────── */
 .stApp {
-    background-color: #030303 !important;
-    background-image: 
-        radial-gradient(ellipse at 20% 0%, rgba(99,102,241,0.05) 0%, transparent 60%),
-        radial-gradient(ellipse at 80% 100%, rgba(244,63,94,0.05) 0%, transparent 60%) !important;
+    background-color: #0d1117 !important;
 }
-
-/* ── Hero Geometric Animations ────────────────────────────── */
-@keyframes float {
-    0%, 100% { transform: translateY(0px) rotate(var(--rot)); }
-    50% { transform: translateY(15px) rotate(var(--rot)); }
-}
-
-@keyframes fadeUp {
-    from { opacity: 0; transform: translateY(30px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.elegant-shape {
-    position: absolute;
-    border-radius: 9999px;
-    backdrop-filter: blur(2px);
-    border: 2px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 8px 32px 0 rgba(255, 255, 255, 0.1);
-    animation: float 12s infinite ease-in-out;
-    z-index: 0;
-    pointer-events: none;
-    overflow: hidden;
-}
-
-.elegant-shape::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 9999px;
-    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.2), transparent 70%);
-}
-
-.hero-fade-up {
-    animation: fadeUp 1s cubic-bezier(0.25, 0.4, 0.25, 1) forwards;
-    opacity: 0;
-}
-.hero-delay-0 { animation-delay: 0.5s; }
-.hero-delay-1 { animation-delay: 0.7s; }
-.hero-delay-2 { animation-delay: 0.9s; }
-
 
 /* ── Unified Pose Cards (Container mapping) ─────────────────── */
 [data-testid="stVerticalBlockBorderWrapper"] {
@@ -241,7 +198,7 @@ h1, h2, h3 { font-family: 'Outfit', sans-serif !important; }
 
 /* ── Primary action button (Run Analysis) ─────────────────── */
 .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%) !important;
+    background: var(--accent-teal) !important;
     color: #ffffff !important;
     font-weight: 700 !important;
     border: none !important;
@@ -343,12 +300,13 @@ _DEFAULTS = {
     "screen":       "landing",
     "selected_pose": None,
     "selected_side": "right",
-    "is_full_session": False,
     "arom_file":     None,
     "prom_file":     None,
     "results_dir":   None,
     "run_error":     None,
     "run_stdout":    None,
+    "full_poses_data": {},
+    "full_results_dir": None,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -366,33 +324,43 @@ def _go(screen: str, **extra):
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_landing():
     st.markdown("")
-    # Animated geometric hero
+    # Clean, static hero section
     st.markdown(
-        """<div style="position: relative; width: 100%; min-height: 48vh; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-top: -2rem; margin-bottom: 2rem;">
-<!-- Floating Shapes Background -->
-<div style="position: absolute; inset: 0; overflow: hidden; pointer-events: none;">
-<div class="elegant-shape" style="--rot: 12deg; width: 600px; height: 140px; background: linear-gradient(to right, rgba(99,102,241,0.15), transparent); left: -5%; top: 20%;"></div>
-<div class="elegant-shape" style="--rot: -15deg; width: 500px; height: 120px; background: linear-gradient(to right, rgba(244,63,94,0.15), transparent); right: 0%; top: 75%; animation-delay: 0.5s;"></div>
-<div class="elegant-shape" style="--rot: 20deg; width: 200px; height: 60px; background: linear-gradient(to right, rgba(245,158,11,0.15), transparent); right: 20%; top: 15%; animation-delay: 0.6s;"></div>
-</div>
-<!-- Text Content -->
-<div style="position: relative; z-index: 10; text-align: center; max-width: 800px; padding: 0 1rem;">
-<div class="hero-fade-up hero-delay-0" style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 9999px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 2rem;">
-<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgba(244,63,94,0.8); margin-top: auto; margin-bottom: auto;"></span>
+        """<div style="width: 100%; display: flex; align-items: center; justify-content: center; margin-top: 1rem; margin-bottom: 3rem;">
+<div style="text-align: center; max-width: 800px; padding: 0 1rem;">
+<div style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 9999px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 1.5rem;">
+<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-teal); margin-top: auto; margin-bottom: auto;"></span>
 <span style="font-size: 0.875rem; color: rgba(255,255,255,0.6); letter-spacing: 0.025em;">MI4L Clinical Tool</span>
 </div>
-<h1 class="hero-fade-up hero-delay-1" style="font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 700; line-height: 1.1; margin-bottom: 1.5rem; letter-spacing: -0.025em; text-align: center;">
-<span style="background: linear-gradient(to bottom, #ffffff, rgba(255,255,255,0.8)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Elevate Your</span>
-<br/>
-<span style="background: linear-gradient(to right, #a5b4fc, rgba(255,255,255,0.9), #fda4af); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Movement Vision</span>
+<h1 style="font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 700; line-height: 1.1; margin-bottom: 1rem; letter-spacing: -0.025em; color: var(--text-primary);">
+MWI Mobility Analysis
 </h1>
-<p class="hero-fade-up hero-delay-2" style="font-size: clamp(1rem, 2vw, 1.15rem); color: rgba(255,255,255,0.4); font-weight: 300; letter-spacing: 0.025em; line-height: 1.6; max-width: 500px; margin: 0 auto; text-align: center;">
-Biomechanical range-of-motion assessment powered by computer vision. Select a pose to begin your analysis.
+<p style="font-size: clamp(1rem, 2vw, 1.15rem); color: var(--text-secondary); font-weight: 300; letter-spacing: 0.025em; line-height: 1.6; max-width: 600px; margin: 0 auto;">
+Analyze joint mobility, calculate Active vs Passive Range of Motion, and generate an MI4L score.
 </p>
 </div>
 </div>""", 
         unsafe_allow_html=True
     )
+
+    # ── Full Assessment Entry Card ──────────────────────────────
+    st.markdown('<div class="section-header">🏆 Full MWI Assessment</div>', unsafe_allow_html=True)
+    
+    with st.container(border=True):
+        st.markdown(
+            """
+            <div class="card-info" style="height: auto; padding: 1.5rem; text-align: left; align-items: flex-start;">
+                <h4 style="font-size: 1.25rem;">Full MWI Assessment</h4>
+                <p style="font-size: 0.95rem; margin-top: 0.5rem;">Upload all the videos at once, to calculate your complete MWI result and analysis of each individual pose at once</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("Select Full Assessment", key="sel_full_assessment", use_container_width=True):
+            _go("full_upload")
+            st.rerun()
+            
+    st.markdown('<div class="section-header">🎯 Single Pose Analysis</div>', unsafe_allow_html=True)
 
     # ── Pose grid (4 + 3) ───────────────────────────────────
     row1_keys = POSE_KEYS[:4]
@@ -441,39 +409,15 @@ Biomechanical range-of-motion assessment powered by computer vision. Select a po
 # ║  SCREEN 2 — UPLOAD                                         ║
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_upload():
-    # ── Sidebar Configuration ───────────────────────────────
-    st.sidebar.markdown("### Configuration")
-    
-    # Pose Selector
-    pose_options = {key: _display_name(key) for key in POSE_KEYS}
-    selected_pose_name = st.sidebar.selectbox(
-        "Movement Type",
-        options=list(pose_options.values()),
-        index=list(pose_options.keys()).index(st.session_state.selected_pose) if st.session_state.selected_pose in pose_options else 0
-    )
-    # Reverse lookup for pose_key
-    pose_key = next((k for k, v in pose_options.items() if v == selected_pose_name), st.session_state.selected_pose)
-    st.session_state.selected_pose = pose_key
-    
+    pose_key = st.session_state.selected_pose
     meta = POSE_METADATA.get(pose_key, {})
     bilateral = pose_key in BILATERAL_POSES
 
-    # Side Selector
-    if not bilateral:
-        side_options = ["Left", "Right"]
-        side_idx = 0 if st.session_state.selected_side == "left" else 1
-        side = st.sidebar.radio("Side", side_options, index=side_idx)
-        st.session_state.selected_side = side.lower()
-    else:
-        st.sidebar.info("This is a bilateral pose — both sides are analysed automatically.")
-        st.session_state.selected_side = "both"
-
-    # Back button to landing
-    if st.sidebar.button("← Back to Landing", use_container_width=True):
+    # Back button
+    if st.button("← Back to poses"):
         _go("landing")
         st.rerun()
 
-    # ── Main Area ───────────────────────────────────────────
     st.markdown(
         f"<h2 style='margin-bottom:0.2rem;'>{_display_name(pose_key)}</h2>",
         unsafe_allow_html=True,
@@ -485,82 +429,78 @@ def _render_upload():
 
     st.divider()
 
-    # ── Tabs for Analysis Mode ──────────────────────────────
-    tab_single, tab_session = st.tabs(["Single Video", "Full Session"])
+    # ── Side selector (unilateral only) ─────────────────────
+    if not bilateral:
+        side = st.radio(
+            "Side",
+            ["Left", "Right"],
+            index=0 if st.session_state.selected_side == "left" else 1,
+            horizontal=True,
+        )
+        st.session_state.selected_side = side.lower()
+    else:
+        st.session_state.selected_side = "both"
+        st.info("This is a bilateral pose — both sides are analysed automatically.")
+
+    st.markdown("")
 
     # ── File uploaders ──────────────────────────────────────
     is_stick_pass = pose_key == "shoulder_stick_pass_through"
 
-    with tab_single:
-        st.markdown("##### Upload Video")
-        single_arom = st.file_uploader(
-            "Upload raw AROM video",
+    if is_stick_pass:
+        # Shoulder extension uses a single video (no AROM/PROM split)
+        st.markdown("##### Video *")
+        arom = st.file_uploader(
+            "Upload video",
             type=["mp4", "mov", "avi"],
-            key="upload_single",
+            key="upload_arom",
             label_visibility="collapsed",
         )
-        if single_arom:
-            st.video(single_arom)
+        prom = None  # not applicable
+        if arom:
+            st.video(arom)
+    else:
+        col_a, col_p = st.columns(2)
 
-        st.markdown("")
-        run_single_disabled = single_arom is None
-        if st.button(
-            "🚀  Run Single Analysis",
-            use_container_width=True,
-            disabled=run_single_disabled,
-            type="primary",
-            key="run_single_btn"
-        ):
-            st.session_state.is_full_session = False
-            st.session_state.arom_file = single_arom
-            st.session_state.prom_file = None
-            _go("processing")
-            st.rerun()
+        with col_a:
+            st.markdown("##### AROM Video *")
+            arom = st.file_uploader(
+                "Upload AROM video",
+                type=["mp4", "mov", "avi"],
+                key="upload_arom",
+                label_visibility="collapsed",
+            )
+            if arom:
+                st.video(arom)
 
-    with tab_session:
-        st.info("Full Session computes both Active and Passive ranges to calculate the MI4L capacity score.")
-        
-        if is_stick_pass:
-            st.warning("Shoulder Extension uses a single test methodology. Please use the Single Video tab.")
-        else:
-            col_a, col_p = st.columns(2)
+        with col_p:
+            st.markdown("##### PROM Video *")
+            prom = st.file_uploader(
+                "Upload PROM video",
+                type=["mp4", "mov", "avi"],
+                key="upload_prom",
+                label_visibility="collapsed",
+            )
+            if prom:
+                st.video(prom)
 
-            with col_a:
-                st.markdown("##### AROM Video *")
-                session_arom = st.file_uploader(
-                    "Upload AROM video",
-                    type=["mp4", "mov", "avi"],
-                    key="upload_session_arom",
-                    label_visibility="collapsed",
-                )
-                if session_arom:
-                    st.video(session_arom)
+    st.markdown("")
 
-            with col_p:
-                st.markdown("##### PROM Video *")
-                session_prom = st.file_uploader(
-                    "Upload PROM video",
-                    type=["mp4", "mov", "avi"],
-                    key="upload_session_prom",
-                    label_visibility="collapsed",
-                )
-                if session_prom:
-                    st.video(session_prom)
-
-            st.markdown("")
-            run_session_disabled = session_arom is None or session_prom is None
-            if st.button(
-                "🚀  Run Full Session",
-                use_container_width=True,
-                disabled=run_session_disabled,
-                type="primary",
-                key="run_session_btn"
-            ):
-                st.session_state.is_full_session = True
-                st.session_state.arom_file = session_arom
-                st.session_state.prom_file = session_prom
-                _go("processing")
-                st.rerun()
+    # ── Run button ──────────────────────────────────────────
+    if is_stick_pass:
+        run_disabled = arom is None
+    else:
+        run_disabled = arom is None or prom is None
+    if st.button(
+        "🚀  Run Analysis",
+        use_container_width=True,
+        disabled=run_disabled,
+        type="primary",
+    ):
+        st.session_state.arom_file = arom
+        st.session_state.prom_file = prom
+        _go("processing")
+        st.rerun()
 
 
 # ╔═════════════════════════════════════════════════════════════╗
@@ -599,30 +539,18 @@ def _render_processing():
     st.caption(f"Side: **{side.title()}**")
 
     # ── Write uploaded files to temp dir ────────────────────
-    
-    # Modify Output path based on session vs single
-    if st.session_state.is_full_session:
-        # Full Session Output
-        stamp = int(time.time())
-        out_dir = _PROJECT_ROOT / "results" / "sessions" / f"{pose_key}_{stamp}"
-        out_dir.parent.mkdir(parents=True, exist_ok=True)
-        out_dir.mkdir(exist_ok=True)
-        # Use a true temporary directory for raw inputs only to avoid bloat
-        tmp_input_dir = Path(tempfile.mkdtemp(prefix="mi4l_input_"))
-    else:
-        # Temporary output for fast single iterations
-        tmp_root = Path(tempfile.mkdtemp(prefix="mi4l_ui_"))
-        tmp_input_dir = tmp_root / "input"
-        tmp_input_dir.mkdir()
-        out_dir = tmp_root / "output"
-        out_dir.mkdir()
+    tmp_root = Path(tempfile.mkdtemp(prefix="mi4l_ui_"))
+    input_dir = tmp_root / "input"
+    input_dir.mkdir()
+    out_dir = tmp_root / "output"
+    out_dir.mkdir()
 
-    arom_path = tmp_input_dir / "arom_video.mp4"
+    arom_path = input_dir / "arom_video.mp4"
     arom_path.write_bytes(st.session_state.arom_file.getvalue())
 
     prom_path = None
     if has_prom:
-        prom_path = tmp_input_dir / "prom_video.mp4"
+        prom_path = input_dir / "prom_video.mp4"
         prom_path.write_bytes(st.session_state.prom_file.getvalue())
 
     # ── Resolve the correct Python interpreter ──────────────
@@ -808,29 +736,16 @@ def _render_results():
         st.code(st.session_state.run_stdout or "(no output)", language="text")
 
     # ── CORE METRICS ────────────────────────────────────────
-    if st.session_state.is_full_session:
-        st.markdown('<div class="section-header">Session Summary</div>', unsafe_allow_html=True)
-        # Using a custom UI for the Side-by-Side breakdown
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Activity Label", "AROM", delta=_fmt(row.get("arom_deg"), "°", 1), delta_color="off")
-        c2.metric("Activity Label", "PROM", delta=_fmt(row.get("prom_deg"), "°", 1), delta_color="off")
-        c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
-        mi4l_val = row.get("mi4l")
-        mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
-        mi4l_valid = row.get("mi4l_valid", False)
-        c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
-                  delta_color="normal" if mi4l_valid else "inverse")
-    else:
-        st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("AROM Peak", _fmt(row.get("arom_deg"), "°"))
-        c2.metric("PROM Peak", _fmt(row.get("prom_deg"), "°"))
-        c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
-        mi4l_val = row.get("mi4l")
-        mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
-        mi4l_valid = row.get("mi4l_valid", False)
-        c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
-                  delta_color="normal" if mi4l_valid else "inverse")
+    st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("AROM Peak", _fmt(row.get("arom_deg"), "°"))
+    c2.metric("PROM Peak", _fmt(row.get("prom_deg"), "°"))
+    c3.metric("Assist Gap", _fmt(row.get("assist_gap"), "°"))
+    mi4l_val = row.get("mi4l")
+    mi4l_display = _fmt(mi4l_val, decimals=3) if pd.notna(mi4l_val) else "—"
+    mi4l_valid = row.get("mi4l_valid", False)
+    c4.metric("MI4L Score", mi4l_display, delta="Valid" if mi4l_valid else "Invalid",
+              delta_color="normal" if mi4l_valid else "inverse")
 
     # ── QUALITY METRICS ─────────────────────────────────────
     st.markdown('<div class="section-header">End-Range Quality</div>', unsafe_allow_html=True)
@@ -875,28 +790,10 @@ def _render_results():
         snap_files = sorted(snap_dir.glob("*.png"))
         if snap_files:
             st.markdown("**Snapshots**")
-            
-            if st.session_state.is_full_session:
-                arom_snaps = [s for s in snap_files if "arom" in s.name.lower()]
-                prom_snaps = [s for s in snap_files if "prom" in s.name.lower()]
-                
-                # Pair them up
-                max_len = max(len(arom_snaps), len(prom_snaps))
-                for i in range(max_len):
-                    col_a, col_p = st.columns(2)
-                    with col_a:
-                        if i < len(arom_snaps):
-                            sf = arom_snaps[i]
-                            st.image(str(sf), caption=f"AROM: {sf.stem.replace('_', ' ').title()}", use_container_width=True)
-                    with col_p:
-                        if i < len(prom_snaps):
-                            sf = prom_snaps[i]
-                            st.image(str(sf), caption=f"PROM: {sf.stem.replace('_', ' ').title()}", use_container_width=True)
-            else:
-                snap_cols = st.columns(min(len(snap_files), 3))
-                for i, sf in enumerate(snap_files):
-                    with snap_cols[i % len(snap_cols)]:
-                        st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
+            snap_cols = st.columns(min(len(snap_files), 3))
+            for i, sf in enumerate(snap_files):
+                with snap_cols[i % len(snap_cols)]:
+                    st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
 
     # ── EXPORT / DOWNLOADS ──────────────────────────────────
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
@@ -956,6 +853,443 @@ def _render_results():
 
 
 # ╔═════════════════════════════════════════════════════════════╗
+# ║  SCREEN 5 — FULL UPLOAD                                     ║
+# ╚═════════════════════════════════════════════════════════════╝
+def _render_full_upload():
+    if st.button("← Back to poses"):
+        _go("landing")
+        st.rerun()
+
+    st.markdown("## 🏆 Full MWI Assessment")
+    st.markdown("Upload your AROM and PROM videos for all supported poses to generate a complete scorecard.")
+
+    data = st.session_state.full_poses_data
+    total_poses = len(POSE_KEYS)
+    uploaded_poses = sum(1 for k in POSE_KEYS if data.get(k, {}).get("arom") is not None)
+
+    st.markdown(
+        """
+        <style>
+        /* Target the first major column to act as a sticky sidebar */
+        [data-testid="column"]:first-of-type {
+            position: sticky;
+            top: 4rem;
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    side_col, main_col = st.columns([1, 2.5], gap="large")
+
+    with side_col:
+        st.markdown("### 📊 Assessment Progress", unsafe_allow_html=True)
+        st.progress(uploaded_poses / total_poses if total_poses > 0 else 0)
+        st.markdown(f"**{uploaded_poses} of {total_poses} poses uploaded**")
+        st.divider()
+        if st.button("🚀 Begin Full Analysis", use_container_width=True, type="primary", disabled=uploaded_poses == 0):
+            _go("full_processing")
+            st.rerun()
+
+    with main_col:
+        for pose_key in POSE_KEYS:
+            bilateral = pose_key in BILATERAL_POSES
+            meta = POSE_METADATA.get(pose_key, {})
+            
+            with st.container(border=True):
+                if pose_key not in data:
+                    data[pose_key] = {"arom": None, "prom": None, "side": "both" if bilateral else "right"}
+                    
+                img_col, ctrl_col = st.columns([1, 2.5], gap="large")
+                
+                with img_col:
+                    img_path = POSE_IMAGES.get(pose_key)
+                    if img_path and img_path.exists():
+                        st.image(str(img_path), use_container_width=True)
+                    st.markdown(f"#### {_display_name(pose_key)}")
+                    st.caption(f"{meta.get('joint_name', '').title()} · {'Bilateral' if bilateral else 'Unilateral'}")
+                    
+                with ctrl_col:
+                    st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
+                    if not bilateral:
+                        side = st.radio("Target Side", ["Left", "Right"], key=f"side_{pose_key}", horizontal=True, 
+                                        index=0 if data[pose_key]["side"] == "left" else 1)
+                        data[pose_key]["side"] = side.lower()
+                    
+                    is_stick_pass = pose_key == "shoulder_stick_pass_through"
+                    
+                    if is_stick_pass:
+                        arom = st.file_uploader("Upload Video *", type=["mp4", "mov", "avi"], key=f"arom_{pose_key}")
+                        data[pose_key]["arom"] = arom
+                    else:
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            arom = st.file_uploader("AROM Video *", type=["mp4", "mov", "avi"], key=f"arom_{pose_key}")
+                            data[pose_key]["arom"] = arom
+                        with c2:
+                            prom = st.file_uploader("PROM Video *", type=["mp4", "mov", "avi"], key=f"prom_{pose_key}")
+                            data[pose_key]["prom"] = prom
+
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  SCREEN 6 — FULL PROCESSING                                 ║
+# ╚═════════════════════════════════════════════════════════════╝
+def _render_full_processing():
+    # ── 1. Render background UI but blur it out ─────────────
+    st.markdown(
+        """
+        <style>
+        /* Blur the main app elements slightly */
+        .stApp > header, .main .block-container {
+            filter: blur(5px) brightness(0.5);
+            pointer-events: none;
+            user-select: none;
+        }
+        
+        /* The foreground processing modal */
+        #processing-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 999999;
+            background: rgba(13, 17, 23, 0.95);
+            border: 1px solid rgba(99,102,241,0.4);
+            border-radius: 20px;
+            padding: 4rem 3rem;
+            width: 90%;
+            max-width: 650px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99,102,241,0.2);
+            backdrop-filter: blur(16px);
+            text-align: center;
+        }
+        
+        #processing-modal h2 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+            font-size: 1.75rem;
+            color: #f0f4f8;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+        
+        #processing-modal p.subtext {
+            color: rgba(255,255,255,0.6);
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+        }
+        </style>
+        
+        <div id="processing-modal">
+            <h2>⚙️ Pipeline Processing</h2>
+            <p class="subtext">Analyzing biomechanics across all poses...</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # ── 2. Render actual progress containers using Streamlit logic ────
+    # They will visually hover on the blurred background because Streamlit appends them after the style tags
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    assessments_dir = _PROJECT_ROOT / "results" / "assessments"
+    assessments_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = assessments_dir / f"{timestamp}_Session"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    st.session_state.full_results_dir = str(out_dir)
+
+    tmp_root = Path(tempfile.mkdtemp(prefix="mi4l_full_"))
+    
+    pipeline_python = _find_pipeline_python()
+    script_path = str(_PROJECT_ROOT / "scripts" / "run_mi4l.py")
+    config_path = str(_PROJECT_ROOT / "configs" / "default.yaml")
+
+    data = st.session_state.full_poses_data
+    poses_to_run = [k for k in POSE_KEYS if data.get(k, {}).get("arom") is not None]
+    
+    # Empty placeholders that act as our modal content
+    modal_container = st.container()
+    with modal_container:
+        st.markdown(
+            """
+            <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -10%); z-index: 9999999; width: 100%; max-width: 550px; text-align: center; padding: 0 2rem;">
+            """, unsafe_allow_html=True
+        )
+        status_text = st.empty()
+        progress_bar = st.progress(0)
+        action_button = st.empty()
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+    all_summary_data = []
+
+    for i, pose_key in enumerate(poses_to_run):
+        pose_data = data[pose_key]
+        status_text.markdown(f"<h3 style='color: white; font-size: 1.25rem; font-weight: 500; margin-bottom: 1rem;'>Processing {_display_name(pose_key)} ({i+1}/{len(poses_to_run)})...</h3>", unsafe_allow_html=True)
+        
+        pose_tmp = tmp_root / pose_key
+        pose_tmp.mkdir(parents=True, exist_ok=True)
+        pose_out = out_dir / pose_key
+        pose_out.mkdir(parents=True, exist_ok=True)
+        
+        arom_file = pose_data["arom"]
+        prom_file = pose_data["prom"]
+        
+        arom_path = pose_tmp / "arom.mp4"
+        arom_path.write_bytes(arom_file.getvalue())
+        
+        cmd = [
+            pipeline_python, script_path,
+            "--arom", str(arom_path),
+            "--out", str(pose_out),
+            "--pose", pose_key,
+            "--side", pose_data["side"],
+            "--config", config_path,
+        ]
+        
+        if prom_file is not None:
+            prom_path = pose_tmp / "prom.mp4"
+            prom_path.write_bytes(prom_file.getvalue())
+            cmd.extend(["--prom", str(prom_path)])
+            
+        try:
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(_PROJECT_ROOT), timeout=600
+            )
+            summary_csv = pose_out / "summary.csv"
+            if summary_csv.exists():
+                df = pd.read_csv(summary_csv)
+                if not df.empty:
+                    row_dict = df.iloc[0].to_dict()
+                    row_dict["pose_key"] = pose_key
+                    all_summary_data.append(row_dict)
+                    
+        except Exception as e:
+            st.error(f"Error processing {pose_key}: {e}")
+            
+        progress_bar.progress((i + 1) / len(poses_to_run))
+        
+    status_text.markdown("<h3 style='color: #10b981;'>✅ Processing Complete!</h3>", unsafe_allow_html=True)
+    
+    import json
+    with open(out_dir / "master_summary.json", "w") as f:
+        json.dump(all_summary_data, f, indent=4)
+        
+    with action_button.container():
+        st.markdown("<br/>", unsafe_allow_html=True)
+        if st.button("View Mobility Report Card", type="primary", use_container_width=True):
+            _go("full_results")
+            st.rerun()
+        _go("full_results")
+        st.rerun()
+
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  SCREEN 7 — FULL RESULTS                                    ║
+# ╚═════════════════════════════════════════════════════════════╝
+def _render_full_results():
+    if st.button("🏠 New Assessment"):
+        _go("landing")
+        st.rerun()
+        
+    out_dir = Path(st.session_state.full_results_dir)
+    json_path = out_dir / "master_summary.json"
+    
+    if not json_path.exists():
+        st.error("No summary data found for this session.")
+        return
+        
+    import json
+    with open(json_path, "r") as f:
+        all_data = json.load(f)
+        
+    if not all_data:
+        st.warning("No valid results were generated.")
+        return
+        
+    st.markdown("## 🏆 Mobility Report Card")
+    st.caption(f"Session: {out_dir.name}")
+    
+    valid_mi4ls = [d["mi4l"] for d in all_data if d.get("mi4l_valid", str(d.get("mi4l_valid")) == "True") and pd.notna(d.get("mi4l"))]
+    global_mi4l = sum(valid_mi4ls) / len(valid_mi4ls) if valid_mi4ls else None
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Poses Analyzed", len(all_data))
+    
+    mi4l_display = f"{global_mi4l:.3f}" if global_mi4l is not None else "—"
+    c2.metric("Global MI4L Index", mi4l_display, "Average Body Mobility", delta_color="normal")
+    
+    st.markdown("### 🌡️ Body Heatmap (Stiffness vs. Mobility)")
+    st.markdown("Green indicates high mobility (MI4L >= 0.20 or good range), Red indicates stiffness.")
+    
+    import plotly.graph_objects as go
+    
+    joints = []
+    scores = []
+    colors = []
+    
+    for d in all_data:
+        j_name = d.get("joint_name", "Unknown").title()
+        pk = d["pose_key"]
+        val = d.get("mi4l")
+        if pd.isna(val) or not d.get("mi4l_valid", str(d.get("mi4l_valid")) == "True"):
+            val = 0.0 # Default if invalid just for color mapping
+        
+        joints.append(f"{_display_name(pk)}")
+        scores.append(val)
+        
+        if val < 0.1:
+            colors.append("#ef4444") # Red
+        elif val < 0.2:
+            colors.append("#f59e0b") # Amber
+        else:
+            colors.append("#10b981") # Green
+            
+    fig = go.Figure(data=[go.Bar(
+        x=joints,
+        y=scores,
+        marker_color=colors,
+        text=[f"{s:.3f}" for s in scores],
+        textposition='auto',
+    )])
+    fig.update_layout(title_text='Joint Mobility (MI4L Score)', yaxis_title='MI4L Score', template='plotly_dark')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    st.markdown("## 📋 Detailed Pose Reports")
+    
+    for d in all_data:
+        pose_key = d["pose_key"]
+        name = _display_name(pose_key)
+        pose_dir = out_dir / pose_key
+        
+        st.markdown(f"### ❖ {name}")
+        
+        # ── CORE METRICS ────────────────────────────────────────
+        st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("AROM Peak", _fmt(d.get("arom_deg"), "°"))
+        c2.metric("PROM Peak", _fmt(d.get("prom_deg"), "°"))
+        c3.metric("Assist Gap", _fmt(d.get("assist_gap"), "°"))
+        c_mi4l = d.get("mi4l")
+        mi4l_display_pose = _fmt(c_mi4l, decimals=3) if pd.notna(c_mi4l) else "—"
+        mi4l_valid_pose = d.get("mi4l_valid", str(d.get("mi4l_valid")) == "True")
+        c4.metric("MI4L Score", mi4l_display_pose, delta="Valid" if mi4l_valid_pose else "Invalid",
+                  delta_color="normal" if mi4l_valid_pose else "inverse")
+                  
+        # ── QUALITY METRICS ─────────────────────────────────────
+        st.markdown('<div class="section-header">End-Range Quality</div>', unsafe_allow_html=True)
+        q1, q2, q3, q4, q5 = st.columns(5)
+        q1.metric("Peak Hold Time", _fmt(d.get("peak_hold_time_s"), " s", 2))
+        q2.metric("Peak Stability", _fmt(d.get("peak_band_std_deg"), "°", 2))
+        q3.metric("Time to Peak", _fmt(d.get("time_to_peak_s"), " s", 2))
+        q4.metric("Jerk RMS", _fmt(d.get("jerk_rms"), decimals=2))
+        q5.metric("Fit R²", _fmt(d.get("fit_r2"), decimals=3))
+        
+        # ── COMPENSATION METRICS ────────────────────────────────
+        st.markdown('<div class="section-header">Compensation</div>', unsafe_allow_html=True)
+        comp1, comp2, comp3 = st.columns(3)
+        comp1.metric("Torso Angle Change", _fmt(d.get("torso_angle_change_deg"), "°", 2))
+        comp2.metric("Pelvis Drift", _fmt(d.get("pelvis_drift_norm"), decimals=3))
+        comp3.metric("Frames Valid", _fmt(d.get("frames_valid_pct"), "%", 1))
+        
+        # ── QC FLAGS ────────────────────────────────────────────
+        flags = str(d.get("qc_flags", ""))
+        if flags and flags != "nan":
+            with st.expander("⚠️  QC Flags", expanded=False):
+                for f in flags.split(";"):
+                    if f.strip():
+                        st.markdown(f"- `{f.strip()}`")
+
+        # ── VISUALISATIONS ──────────────────────────────────────
+        st.markdown('<div class="section-header">Visualisations</div>', unsafe_allow_html=True)
+
+        # Plots
+        plot_files = sorted(pose_dir.glob("plot_*.png"))
+        if plot_files:
+            plot_cols = st.columns(min(len(plot_files), 2))
+            for i, pf in enumerate(plot_files):
+                with plot_cols[i % len(plot_cols)]:
+                    st.image(str(pf), caption=pf.stem.replace("_", " ").title(), use_container_width=True)
+        else:
+            st.info("No plot images were generated.")
+
+        # Snapshots
+        snap_dir = pose_dir / "snapshots"
+        if snap_dir.exists():
+            snap_files = sorted(snap_dir.glob("*.png"))
+            if snap_files:
+                st.markdown("**Snapshots**")
+                snap_cols = st.columns(min(len(snap_files), 3))
+                for i, sf in enumerate(snap_files):
+                    with snap_cols[i % len(snap_cols)]:
+                        st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
+
+        # ── EXPORT / DOWNLOADS ──────────────────────────────────
+        st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
+        d1, d2, d3, d4 = st.columns(4)
+
+        # Summary CSV
+        summary_path = pose_dir / "summary.csv"
+        with d1:
+            if summary_path.exists():
+                st.download_button(
+                    "📋 Summary CSV",
+                    data=summary_path.read_bytes(),
+                    file_name=f"{pose_key}_summary.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key=f"dl_sum_{pose_key}"
+                )
+
+        # Full angle CSVs
+        angle_csvs = sorted(pose_dir.glob("angles_*.csv"))
+        with d2:
+            if angle_csvs:
+                for ac in angle_csvs:
+                    st.download_button(
+                        f"📄 {ac.stem.replace('_', ' ').title()}",
+                        data=ac.read_bytes(),
+                        file_name=f"{pose_key}_{ac.name}",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key=f"dl_ang_{pose_key}_{ac.name}",
+                    )
+
+        # Plot downloads
+        with d3:
+            if plot_files:
+                for pf in plot_files:
+                    st.download_button(
+                        f"📈 {pf.stem.replace('_', ' ').title()}",
+                        data=pf.read_bytes(),
+                        file_name=f"{pose_key}_{pf.name}",
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_plt_{pose_key}_{pf.name}",
+                    )
+
+        # Snapshots download
+        with d4:
+            if snap_dir.exists():
+                snap_files_all = sorted(snap_dir.glob("*.png"))
+                for sf in snap_files_all:
+                    st.download_button(
+                        f"🖼️ {sf.stem.replace('_', ' ').title()}",
+                        data=sf.read_bytes(),
+                        file_name=f"{pose_key}_{sf.name}",
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_snp_{pose_key}_{sf.name}",
+                    )
+        
+        st.write("")
+        st.markdown("---")
+
+
+# ╔═════════════════════════════════════════════════════════════╗
 # ║  ROUTER                                                    ║
 # ╚═════════════════════════════════════════════════════════════╝
 _SCREENS = {
@@ -963,6 +1297,9 @@ _SCREENS = {
     "upload":     _render_upload,
     "processing": _render_processing,
     "results":    _render_results,
+    "full_upload": _render_full_upload,
+    "full_processing": _render_full_processing,
+    "full_results": _render_full_results,
 }
 
 _SCREENS.get(st.session_state.screen, _render_landing)()
