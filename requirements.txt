@@ -3,7 +3,7 @@
 # Requires Python 3.10 or 3.11 (see README for full setup instructions)
 
 opencv-python>=4.8,<5
-mediapipe==0.10.8
+mediapipe==0.10.32
 pandas>=2.0
 numpy>=1.24
 scipy>=1.11
