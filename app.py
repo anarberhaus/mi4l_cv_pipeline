@@ -753,12 +753,16 @@ def _render_processing():
 
     def _run_pipeline():
         try:
+            import os
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(_PROJECT_ROOT / "src")
             res = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=600,
                 cwd=str(_PROJECT_ROOT),
+                env=env,
             )
             result_holder["result"] = res
         except Exception as exc:
@@ -1352,8 +1356,16 @@ def _render_full_processing():
             cmd.extend(["--prom", str(prom_path)])
             
         try:
+            import os
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(_PROJECT_ROOT / "src")
             res = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=str(_PROJECT_ROOT), timeout=600
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                cwd=str(_PROJECT_ROOT), 
+                timeout=600,
+                env=env
             )
             summary_csv = pose_out / "summary.csv"
             if summary_csv.exists():
