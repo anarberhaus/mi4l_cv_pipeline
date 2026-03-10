@@ -109,6 +109,59 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ---------------------------------------------------------------------------
+# Auth Initialization (Required before any UI rendering)
+# ---------------------------------------------------------------------------
+from mi4l.supabase_client import get_supabase_client
+try:
+    supabase = get_supabase_client()
+except Exception as e:
+    st.error(f"Supabase Configuration Error: {e}")
+    st.stop()
+
+import extra_streamlit_components as stx
+cookie_manager = stx.CookieManager()
+
+if "auth_initialized" not in st.session_state:
+    st.session_state.auth_initialized = False
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "history_analysis_data" not in st.session_state:
+    st.session_state.history_analysis_data = {}
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = None
+
+if not st.session_state.auth_initialized:
+    # 1) Wait for CookieManager mount cycle
+    cookies = cookie_manager.get_all()
+    if len(cookies) == 0 and not st.session_state.get("_cookie_checked", False):
+        st.session_state._cookie_checked = True
+        st.stop()
+
+    # 2) Try native session restoration (Strictly as requested)
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.user = session.user
+            st.session_state.access_token = session.access_token
+            st.session_state.refresh_token = session.refresh_token
+        else:
+            st.session_state.user = None
+    except Exception:
+        st.session_state.user = None
+                
+    st.session_state.auth_initialized = True
+    st.rerun()
+
+# 4) Re-sync Supabase client on every rerun using tokens in session state
+if st.session_state.user and st.session_state.access_token and st.session_state.refresh_token:
+    try:
+        supabase.auth.set_session(st.session_state.access_token, st.session_state.refresh_token)
+    except Exception as e:
+        print(f"DEBUG: Re-sync Error: {e}")
+
 st.markdown("""
 <style>
 /* ── Typography ───────────────────────────────────────────── */
@@ -406,7 +459,7 @@ Analyze joint mobility, calculate Active vs Passive Range of Motion, and generat
 
     # ── Render History Log ───────────────────────────────────
     _render_history_log()
-
+    
 # ╔═════════════════════════════════════════════════════════════╗
 # ║  HISTORY LOG COMPONENT                                      ║
 # ╚═════════════════════════════════════════════════════════════╝
@@ -416,11 +469,11 @@ def _render_history_log():
     
     st.markdown('<div class="section-header" style="margin-top: 3rem;">🕒 Analysis History Log</div>', unsafe_allow_html=True)
     
-    user_id = st.session_state.get("user_id")
-    if not user_id:
+    if not st.session_state.get("user"):
         st.info("Please log in to view your analysis history.")
         return
         
+    user_id = st.session_state.user.id
     try:
         response = supabase.table("analyses").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
         analyses = response.data
@@ -454,17 +507,79 @@ def _render_history_log():
                 st.caption(f"{dt.strftime('%d %b %Y, %H:%M:%S')} • Cloud ID: {analysis_id[:8]}")
                 
             with cols[1]:
-                if st.button("View Results", key=f"hist_{analysis_id}", use_container_width=True):
-                    # Cache the history data in session state for the specific results page routers to use
-                    st.session_state.history_analysis_id = analysis_id
-                    st.session_state.history_analysis_data = row
-                    
-                    if a_type == "full_mwi":
-                        _go("full_results")
-                    else:
-                        st.session_state.selected_pose = row.get("pose_name")
-                        _go("results")
-                    st.rerun()
+                btn_cols = st.columns(2)
+                with btn_cols[0]:
+                    if st.button("View", key=f"hist_{analysis_id}", use_container_width=True):
+                        # Cache the history data in session state for the specific results page routers to use
+                        st.session_state.history_analysis_id = analysis_id
+                        st.session_state.history_analysis_data = row
+                        
+                        if a_type == "full_mwi":
+                            _go("full_results")
+                        else:
+                            st.session_state.selected_pose = row.get("pose_name")
+                            _go("results")
+                        st.rerun()
+                
+                with btn_cols[1]:
+                    if st.button("🗑️", key=f"del_trigger_{analysis_id}", use_container_width=True, help="Delete this analysis"):
+                        st.session_state[f"confirm_delete_{analysis_id}"] = True
+                
+                # Confirmation logic
+                
+                if st.session_state.get(f"confirm_delete_{analysis_id}"):
+
+                    try:
+                        # 1️⃣ Delete entire storage folder by prefix
+                        def delete_storage_prefix(bucket: str, prefix: str, page_size: int = 200):
+                            storage = supabase.storage.from_(bucket)
+
+                            files = []
+                            stack = [prefix]
+
+                            while stack:
+                                p = stack.pop()
+                                offset = 0
+
+                                while True:
+                                    items = storage.list(p, {"limit": page_size, "offset": offset})
+                                    if not items:
+                                        break
+
+                                    for it in items:
+                                        name = it["name"]
+                                        full = f"{p}/{name}"
+
+                                        # Heuristic: files have metadata/created_at/id; folders usually don't.
+                                        if it.get("metadata") is not None or it.get("id") is not None:
+                                            files.append(full)
+                                        else:
+                                            stack.append(full)
+
+                                    offset += page_size
+
+                            if files:
+                                storage.remove(files)
+
+                        # usage inside delete
+                        analysis_prefix = f"users/{user_id}/{analysis_id}"
+                        delete_storage_prefix("analysis-results", analysis_prefix)  
+
+                        # 2️⃣ Delete DB row
+                        supabase.table("analyses") \
+                            .delete() \
+                            .eq("id", analysis_id) \
+                            .eq("user_id", user_id) \
+                            .execute()
+
+                        st.toast("Analysis deleted.")
+                        del st.session_state[f"confirm_delete_{analysis_id}"]
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Delete failed: {e}")
+                        del st.session_state[f"confirm_delete_{analysis_id}"]
+                        st.rerun()
 
 
 # ╔═════════════════════════════════════════════════════════════╗
@@ -749,7 +864,7 @@ def _render_processing():
     # ── Supabase Upload ─────────────────────────────────────
     import uuid
     analysis_id = str(uuid.uuid4())
-    user_id = st.session_state.user_id
+    user_id = st.session_state.user.id
     
     summary_json = {}
     summary_csv = out_dir / "summary.csv"
@@ -774,6 +889,34 @@ def _render_processing():
         except Exception as e:
             print(f"Storage Upload Error ({csv_file.name}): {e}")
 
+    snapshot_urls = []
+    timeplot_urls = []
+    
+    # upload snapshots
+    snap_dir = out_dir / "snapshots"
+    if snap_dir.exists() and snap_dir.is_dir():
+        for snap_file in snap_dir.glob("*.png"):
+            storage_path = f"users/{user_id}/{analysis_id}/snapshots/{snap_file.name}"
+            try:
+                with open(snap_file, "rb") as f:
+                    supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "image/png"})
+                url = supabase.storage.from_("analysis-results").create_signed_url(storage_path, 31536000)["signedURL"] # 1 year
+                snapshot_urls.append({"name": snap_file.name, "url": url, "path": storage_path})
+            except Exception as e:
+                print(f"Snapshot Upload Error ({snap_file.name}): {e}")
+                
+    # upload plots
+    plot_files = sorted(out_dir.glob("plot_*.png"))
+    for plot_file in plot_files:
+        storage_path = f"users/{user_id}/{analysis_id}/plots/{plot_file.name}"
+        try:
+            with open(plot_file, "rb") as f:
+                supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "image/png"})
+            url = supabase.storage.from_("analysis-results").create_signed_url(storage_path, 31536000)["signedURL"] # 1 year
+            timeplot_urls.append({"name": plot_file.name, "url": url, "path": storage_path})
+        except Exception as e:
+            print(f"Plot Upload Error ({plot_file.name}): {e}")
+
     try:
         analysis_data = {
             "id": analysis_id,
@@ -782,12 +925,16 @@ def _render_processing():
             "pose_name": pose_key,
             "summary_json": summary_json,
             "csv_files": csv_files,
-            "created_at": str(pd.Timestamp.now())
+            "snapshot_urls": snapshot_urls,
+            "timeplot_urls": timeplot_urls,
+            "created_at": pd.Timestamp.now().isoformat()
         }
-        supabase.table("analyses").insert(analysis_data).execute()
+        res = supabase.table("analyses").insert(analysis_data).execute()
+        print(f"DEBUG: Supabase Insert Result (Single): {res}")
         st.session_state.history_analysis_id = analysis_id
         st.session_state.history_analysis_data = analysis_data
     except Exception as e:
+        print(f"DEBUG: Supabase Insert Error (Single): {e}")
         st.warning(f"Failed to save to cloud history: {e}")
 
     _go("results")
@@ -890,7 +1037,25 @@ def _render_results():
     st.markdown('<div class="section-header">Visualisations</div>', unsafe_allow_html=True)
 
     if is_hist:
-        st.info("Visualisations (Plots & Snapshots) are currently only available for fresh local runs, not historical records.")
+        snap_urls = hist_data.get("snapshot_urls", [])
+        tp_urls = hist_data.get("timeplot_urls", [])
+        
+        if tp_urls:
+            cols = st.columns(min(len(tp_urls), 2))
+            for i, item in enumerate(tp_urls):
+                with cols[i % len(cols)]:
+                    st.image(item["url"], caption=item["name"].replace("_", " ").title(), use_container_width=True)
+        else:
+            st.info("No plot images found for this record.")
+            
+        if snap_urls:
+            st.markdown("**Snapshots**")
+            cols = st.columns(min(len(snap_urls), 3))
+            for i, item in enumerate(snap_urls):
+                with cols[i % len(cols)]:
+                    st.image(item["url"], caption=item["name"].replace("_", " ").title(), use_container_width=True)
+        else:
+            st.info("No snapshots found for this record.")
     else:
         # Plots
         plot_files = sorted(out_dir.glob("plot_*.png"))
@@ -1208,7 +1373,7 @@ def _render_full_processing():
     
     # ── Supabase Upload ─────────────────────────────────────
     analysis_id = str(uuid.uuid4())
-    user_id = st.session_state.user_id
+    user_id = st.session_state.user.id
     csv_files = []
     
     # Clean NaNs in summary data for JSON DB insertion
@@ -1217,16 +1382,47 @@ def _render_full_processing():
         clean_d = {k: (None if pd.isna(v) else v) for k, v in d.items()}
         db_summary_data.append(clean_d)
     
+    snapshot_urls = []
+    timeplot_urls = []
+    
     for pose_dir_item in out_dir.iterdir():
         if pose_dir_item.is_dir():
+            pose_key = pose_dir_item.name
+            
+            # upload all csvs
             for csv_file in pose_dir_item.glob("*.csv"):
-                storage_path = f"users/{user_id}/{analysis_id}/{pose_dir_item.name}/{csv_file.name}"
+                storage_path = f"users/{user_id}/{analysis_id}/{pose_key}/{csv_file.name}"
                 try:
                     with open(csv_file, "rb") as f:
                         supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "text/csv"})
-                    csv_files.append({"name": f"{pose_dir_item.name}_{csv_file.name}", "path": storage_path, "pose_key": pose_dir_item.name})
+                    csv_files.append({"name": f"{pose_key}_{csv_file.name}", "path": storage_path, "pose_key": pose_key})
                 except Exception as e:
                     print(f"Storage Upload Error ({csv_file.name}): {e}")
+            
+            # upload snapshots
+            pose_snap_dir = pose_dir_item / "snapshots"
+            if pose_snap_dir.exists() and pose_snap_dir.is_dir():
+                for snap_file in pose_snap_dir.glob("*.png"):
+                    storage_path = f"users/{user_id}/{analysis_id}/{pose_key}/snapshots/{snap_file.name}"
+                    try:
+                        with open(snap_file, "rb") as f:
+                            supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "image/png"})
+                        url = supabase.storage.from_("analysis-results").create_signed_url(storage_path, 31536000)["signedURL"]
+                        snapshot_urls.append({"name": snap_file.name, "url": url, "path": storage_path, "pose_key": pose_key})
+                    except Exception as e:
+                        print(f"Snapshot Upload Error ({snap_file.name}): {e}")
+            
+            # upload plots
+            pose_plot_files = sorted(pose_dir_item.glob("plot_*.png"))
+            for plot_file in pose_plot_files:
+                storage_path = f"users/{user_id}/{analysis_id}/{pose_key}/plots/{plot_file.name}"
+                try:
+                    with open(plot_file, "rb") as f:
+                        supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "image/png"})
+                    url = supabase.storage.from_("analysis-results").create_signed_url(storage_path, 31536000)["signedURL"]
+                    timeplot_urls.append({"name": plot_file.name, "url": url, "path": storage_path, "pose_key": pose_key})
+                except Exception as e:
+                    print(f"Plot Upload Error ({plot_file.name}): {e}")
                     
     try:
         analysis_data = {
@@ -1236,12 +1432,16 @@ def _render_full_processing():
             "pose_name": None,
             "summary_json": db_summary_data,
             "csv_files": csv_files,
-            "created_at": str(pd.Timestamp.now())
+            "snapshot_urls": snapshot_urls,
+            "timeplot_urls": timeplot_urls,
+            "created_at": pd.Timestamp.now().isoformat()
         }
-        supabase.table("analyses").insert(analysis_data).execute()
+        res = supabase.table("analyses").insert(analysis_data).execute()
+        print(f"DEBUG: Supabase Insert Result (Full): {res}")
         st.session_state.history_analysis_id = analysis_id
         st.session_state.history_analysis_data = analysis_data
     except Exception as e:
+        print(f"DEBUG: Supabase Insert Error (Full): {e}")
         st.warning(f"Failed to save to cloud history: {e}")
     
     with open(out_dir / "master_summary.json", "w") as f:
@@ -1390,7 +1590,25 @@ def _render_full_results():
         st.markdown('<div class="section-header">Visualisations</div>', unsafe_allow_html=True)
 
         if is_hist:
-            st.info("Visualisations (Plots & Snapshots) are currently only available for fresh local runs, not historical records.")
+            pose_snaps = [s for s in hist_data.get("snapshot_urls", []) if s.get("pose_key") == pose_key]
+            pose_plots = [p for p in hist_data.get("timeplot_urls", []) if p.get("pose_key") == pose_key]
+            
+            if pose_plots:
+                cols = st.columns(min(len(pose_plots), 2))
+                for i, item in enumerate(pose_plots):
+                    with cols[i % len(cols)]:
+                        st.image(item["url"], caption=item["name"].replace("_", " ").title(), use_container_width=True)
+            else:
+                st.info("No plot images found for this pose.")
+            
+            if pose_snaps:
+                st.markdown("**Snapshots**")
+                cols = st.columns(min(len(pose_snaps), 3))
+                for i, item in enumerate(pose_snaps):
+                    with cols[i % len(cols)]:
+                        st.image(item["url"], caption=item["name"].replace("_", " ").title(), use_container_width=True)
+            else:
+                st.info("No snapshots found for this pose.")
         else:
             # Plots
             plot_files = sorted(pose_dir.glob("plot_*.png"))
@@ -1503,47 +1721,6 @@ _SCREENS = {
     "full_results": _render_full_results,
 }
 
-from mi4l.supabase_client import get_supabase_client
-try:
-    supabase = get_supabase_client()
-except Exception as e:
-    st.error(f"Supabase Configuration Error: {e}")
-    st.stop()
-
-import extra_streamlit_components as stx
-
-cookie_manager = stx.CookieManager()
-
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "access_token" not in st.session_state:
-    st.session_state.access_token = None
-if "refresh_token" not in st.session_state:
-    st.session_state.refresh_token = None
-if "history_analysis_data" not in st.session_state:
-    st.session_state.history_analysis_data = {}
-
-# Attempt to grab tokens from cookies if session state is empty (e.g. page refresh)
-if not st.session_state.access_token:
-    c_access = cookie_manager.get(cookie="access_token")
-    c_refresh = cookie_manager.get(cookie="refresh_token")
-    if c_access and c_refresh:
-        st.session_state.access_token = c_access
-        st.session_state.refresh_token = c_refresh
-
-# Always restore the Supabase authentication context for this active rerun
-if st.session_state.access_token and st.session_state.refresh_token:
-    try:
-        supabase.auth.set_session(st.session_state.access_token, st.session_state.refresh_token)
-        user_obj = supabase.auth.get_user()
-        if user_obj and user_obj.user:
-            st.session_state.user_id = user_obj.user.id
-    except Exception:
-        # Token likely expired
-        st.session_state.user_id = None
-        st.session_state.access_token = None
-        st.session_state.refresh_token = None
-
 def _render_auth():
     st.markdown("<h2 style='text-align: center; margin-top: 3rem;'>MWI Mobility Analysis Login</h2>", unsafe_allow_html=True)
     with st.container():
@@ -1551,47 +1728,51 @@ def _render_auth():
         with c2:
             with st.container(border=True):
                 st.info("Sign up or log in to sync your mobility history to the cloud.")
-                email = st.text_input("Email")
-                password = st.text_input("Password", type="password")
+                email = st.text_input("Email", key="login_email")
+                password = st.text_input("Password", type="password", key="login_password")
                 st.write("")
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    if st.button("Login", use_container_width=True):
+                    if st.button("Login", use_container_width=True, key="login_button"):
                         try:
                             res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                            st.session_state.user_id = res.user.id
+                            st.session_state.user = res.user
                             st.session_state.access_token = res.session.access_token
                             st.session_state.refresh_token = res.session.refresh_token
-                            cookie_manager.set("access_token", res.session.access_token, max_age=86400 * 30)
-                            cookie_manager.set("refresh_token", res.session.refresh_token, max_age=86400 * 30)
+                            cookie_manager.set("access_token", res.session.access_token, max_age=86400 * 30, key="set_access")
+                            cookie_manager.set("refresh_token", res.session.refresh_token, max_age=86400 * 30, key="set_refresh")
                             time.sleep(0.5) # allow cookies to set
                             st.rerun()
                         except Exception as e:
                             st.error(f"Login failed: {e}")
                 with col_btn2:
-                    if st.button("Sign Up", use_container_width=True):
+                    if st.button("Sign Up", use_container_width=True, key="signup_button"):
                         try:
                             res = supabase.auth.sign_up({"email": email, "password": password})
                             st.success("Signup successful! You can now log in.")
                         except Exception as e:
                             st.error(f"Signup failed: {e}")
 
-if not st.session_state.user_id:
+if not st.session_state.get("auth_initialized"):
+    st.stop()
+
+if not st.session_state.get("user"):
     _render_auth()
-else:
-    # Render logout button in sidebar
-    with st.sidebar:
-        if st.button("Log Out"):
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
-            cookie_manager.delete("access_token")
-            cookie_manager.delete("refresh_token")
-            st.session_state.user_id = None
-            st.session_state.access_token = None
-            st.session_state.refresh_token = None
-            time.sleep(0.5)
-            st.rerun()
-            
-    _SCREENS.get(st.session_state.screen, _render_landing)()
+    st.stop()
+
+# Render logout button in sidebar
+with st.sidebar:
+    if st.button("Log Out", key="logout_button"):
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
+        cookie_manager.delete("access_token", key="del_access")
+        cookie_manager.delete("refresh_token", key="del_refresh")
+        st.session_state.user = None
+        st.session_state.access_token = None
+        st.session_state.refresh_token = None
+        time.sleep(0.5)
+        st.rerun()
+        
+_SCREENS.get(st.session_state.screen, _render_landing)()
