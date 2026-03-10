@@ -31,15 +31,14 @@ from mi4l.metrics.summary_metrics import POSE_METADATA  # noqa: E402
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def _find_pipeline_python() -> str:
-    """Find a Python interpreter that has mediapipe with mp.solutions.pose."""
+    """Find a Python interpreter that has the required dependencies."""
     import shutil as _shutil
 
-    candidates = [
-        # Dedicated conda env – confirmed working
-        r"C:\Users\alexn\anaconda3\envs\mi4l\python.exe",
-        sys.executable,
-    ]
-    for name in ("python", "python3"):
+    # On Streamlit Cloud and most local environments, the current interpreter 
+    # (sys.executable) already has all requirements from requirements.txt.
+    candidates = [sys.executable]
+    
+    for name in ("python3", "python"):
         found = _shutil.which(name)
         if found:
             candidates.append(found)
@@ -51,9 +50,12 @@ def _find_pipeline_python() -> str:
         "print('ok')"
     )
     for candidate in dict.fromkeys(candidates):
-        if not Path(candidate).exists():
-            continue
         try:
+            # Skip if candidate is actually a path that doesn't exist
+            if "/" in candidate or "\\" in candidate:
+                if not Path(candidate).exists():
+                    continue
+            
             res = subprocess.run(
                 [candidate, "-c", check],
                 capture_output=True, text=True, timeout=15,
@@ -63,7 +65,7 @@ def _find_pipeline_python() -> str:
         except Exception:
             continue
 
-    return sys.executable  # fallback
+    return sys.executable  # fallback to current process
 
 # ---------------------------------------------------------------------------
 # Pose registry — extends POSE_METADATA with UI-specific fields
