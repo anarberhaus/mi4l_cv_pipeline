@@ -404,6 +404,68 @@ Analyze joint mobility, calculate Active vs Passive Range of Motion, and generat
     with centre:
         _pose_row(row2_keys)
 
+    # ── Render History Log ───────────────────────────────────
+    _render_history_log()
+
+# ╔═════════════════════════════════════════════════════════════╗
+# ║  HISTORY LOG COMPONENT                                      ║
+# ╚═════════════════════════════════════════════════════════════╝
+def _render_history_log():
+    from datetime import datetime
+    import pandas as pd
+    
+    st.markdown('<div class="section-header" style="margin-top: 3rem;">🕒 Analysis History Log</div>', unsafe_allow_html=True)
+    
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        st.info("Please log in to view your analysis history.")
+        return
+        
+    try:
+        response = supabase.table("analyses").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        analyses = response.data
+    except Exception as e:
+        st.error(f"Failed to fetch history: {e}")
+        return
+        
+    if not analyses:
+        st.info("No past analyses found.")
+        return
+        
+    for row in analyses:
+        analysis_id = row["id"]
+        a_type = row["assessment_type"]
+        # Parse Supabase timestamptz correctly
+        dt = pd.to_datetime(row["created_at"])
+        
+        with st.container(border=True):
+            cols = st.columns([4, 1], vertical_alignment="center")
+            
+            with cols[0]:
+                if a_type == "full_mwi":
+                    icon = "🏆"
+                    name = "Full MWI Assessment"
+                else:
+                    icon = "🎯"
+                    pose_key = row.get("pose_name", "Unknown")
+                    name = _display_name(pose_key)
+                    
+                st.markdown(f"<h4 style='margin:0; font-size:1.1rem;'>{icon} {name}</h4>", unsafe_allow_html=True)
+                st.caption(f"{dt.strftime('%d %b %Y, %H:%M:%S')} • Cloud ID: {analysis_id[:8]}")
+                
+            with cols[1]:
+                if st.button("View Results", key=f"hist_{analysis_id}", use_container_width=True):
+                    # Cache the history data in session state for the specific results page routers to use
+                    st.session_state.history_analysis_id = analysis_id
+                    st.session_state.history_analysis_data = row
+                    
+                    if a_type == "full_mwi":
+                        _go("full_results")
+                    else:
+                        st.session_state.selected_pose = row.get("pose_name")
+                        _go("results")
+                    st.rerun()
+
 
 # ╔═════════════════════════════════════════════════════════════╗
 # ║  SCREEN 2 — UPLOAD                                         ║
@@ -684,6 +746,50 @@ def _render_processing():
     st.session_state.run_error = None
     st.session_state.run_stdout = combined_output
 
+    # ── Supabase Upload ─────────────────────────────────────
+    import uuid
+    analysis_id = str(uuid.uuid4())
+    user_id = st.session_state.user_id
+    
+    summary_json = {}
+    summary_csv = out_dir / "summary.csv"
+    if summary_csv.exists():
+        try:
+            df = pd.read_csv(summary_csv)
+            if not df.empty:
+                row_dict = df.iloc[0].to_dict()
+                row_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
+                summary_json = row_dict
+        except Exception as e:
+            print(f"JSON Parse Error: {e}")
+
+    csv_files = []
+    # upload all csvs
+    for csv_file in out_dir.glob("*.csv"):
+        storage_path = f"users/{user_id}/{analysis_id}/{csv_file.name}"
+        try:
+            with open(csv_file, "rb") as f:
+                supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "text/csv"})
+            csv_files.append({"name": csv_file.name, "path": storage_path})
+        except Exception as e:
+            print(f"Storage Upload Error ({csv_file.name}): {e}")
+
+    try:
+        analysis_data = {
+            "id": analysis_id,
+            "user_id": user_id,
+            "assessment_type": "pose_single",
+            "pose_name": pose_key,
+            "summary_json": summary_json,
+            "csv_files": csv_files,
+            "created_at": str(pd.Timestamp.now())
+        }
+        supabase.table("analyses").insert(analysis_data).execute()
+        st.session_state.history_analysis_id = analysis_id
+        st.session_state.history_analysis_data = analysis_data
+    except Exception as e:
+        st.warning(f"Failed to save to cloud history: {e}")
+
     _go("results")
     st.rerun()
 
@@ -702,9 +808,28 @@ def _fmt(val, suffix="", decimals=1):
 
 
 def _render_results():
-    out_dir = Path(st.session_state.results_dir)
     pose_key = st.session_state.selected_pose
     meta = POSE_METADATA.get(pose_key, {})
+    is_hist = st.session_state.get("history_analysis_id") is not None
+    
+    if is_hist:
+        hist_data = st.session_state.history_analysis_data
+        row = hist_data.get("summary_json", {})
+        csv_files = hist_data.get("csv_files", [])
+        out_dir = Path("historical_run")
+    else:
+        out_dir = Path(st.session_state.results_dir)
+        summary_path = out_dir / "summary.csv"
+        if not summary_path.exists():
+            st.error("summary.csv not found in output directory.")
+            return
+        df = pd.read_csv(summary_path)
+    
+        if df.empty:
+            st.warning("No results were produced. Check QC flags or video quality.")
+            return
+    
+        row = df.iloc[0]  # single-row summary (per the pipeline design)
 
     # ── Header ──────────────────────────────────────────────
     head_left, head_right = st.columns([3, 1])
@@ -715,25 +840,15 @@ def _render_results():
         )
     with head_right:
         if st.button("🏠  New Analysis"):
+            st.session_state.history_analysis_id = None
+            st.session_state.history_analysis_data = None
             _go("landing")
             st.rerun()
 
-    # ── Load summary ────────────────────────────────────────
-    summary_path = out_dir / "summary.csv"
-    if not summary_path.exists():
-        st.error("summary.csv not found in output directory.")
-        return
-    df = pd.read_csv(summary_path)
-
-    if df.empty:
-        st.warning("No results were produced. Check QC flags or video quality.")
-        return
-
-    row = df.iloc[0]  # single-row summary (per the pipeline design)
-
     # ── Console output (collapsed) ──────────────────────────
-    with st.expander("Pipeline console output", expanded=False):
-        st.code(st.session_state.run_stdout or "(no output)", language="text")
+    if not is_hist:
+        with st.expander("Pipeline console output", expanded=False):
+            st.code(st.session_state.run_stdout or "(no output)", language="text")
 
     # ── CORE METRICS ────────────────────────────────────────
     st.markdown('<div class="section-header">Core Metrics</div>', unsafe_allow_html=True)
@@ -774,82 +889,96 @@ def _render_results():
     # ── VISUALISATIONS ──────────────────────────────────────
     st.markdown('<div class="section-header">Visualisations</div>', unsafe_allow_html=True)
 
-    # Plots
-    plot_files = sorted(out_dir.glob("plot_*.png"))
-    if plot_files:
-        plot_cols = st.columns(min(len(plot_files), 2))
-        for i, pf in enumerate(plot_files):
-            with plot_cols[i % len(plot_cols)]:
-                st.image(str(pf), caption=pf.stem.replace("_", " ").title(), use_container_width=True)
+    if is_hist:
+        st.info("Visualisations (Plots & Snapshots) are currently only available for fresh local runs, not historical records.")
     else:
-        st.info("No plot images were generated.")
-
-    # Snapshots
-    snap_dir = out_dir / "snapshots"
-    if snap_dir.exists():
-        snap_files = sorted(snap_dir.glob("*.png"))
-        if snap_files:
-            st.markdown("**Snapshots**")
-            snap_cols = st.columns(min(len(snap_files), 3))
-            for i, sf in enumerate(snap_files):
-                with snap_cols[i % len(snap_cols)]:
-                    st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
+        # Plots
+        plot_files = sorted(out_dir.glob("plot_*.png"))
+        if plot_files:
+            plot_cols = st.columns(min(len(plot_files), 2))
+            for i, pf in enumerate(plot_files):
+                with plot_cols[i % len(plot_cols)]:
+                    st.image(str(pf), caption=pf.stem.replace("_", " ").title(), use_container_width=True)
+        else:
+            st.info("No plot images were generated.")
+    
+        # Snapshots
+        snap_dir = out_dir / "snapshots"
+        if snap_dir.exists():
+            snap_files = sorted(snap_dir.glob("*.png"))
+            if snap_files:
+                st.markdown("**Snapshots**")
+                snap_cols = st.columns(min(len(snap_files), 3))
+                for i, sf in enumerate(snap_files):
+                    with snap_cols[i % len(snap_cols)]:
+                        st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
 
     # ── EXPORT / DOWNLOADS ──────────────────────────────────
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
-    d1, d2, d3, d4 = st.columns(4)
-
-    # Summary CSV
-    with d1:
-        if summary_path.exists():
-            st.download_button(
-                "📋 Summary CSV",
-                data=summary_path.read_bytes(),
-                file_name="summary.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
-    # Full angle CSVs
-    angle_csvs = sorted(out_dir.glob("angles_*.csv"))
-    with d2:
-        if angle_csvs:
-            for ac in angle_csvs:
+    
+    if is_hist:
+        st.markdown("📥 Download CSVs directly from Cloud Storage:")
+        for cf in csv_files:
+            try:
+                res = supabase.storage.from_("analysis-results").create_signed_url(cf["path"], 3600)
+                url = res.get("signedURL")
+                if url:
+                    st.markdown(f"- [**Download {cf['name']}**]({url})")
+            except Exception as e:
+                st.error(f"Failed to load {cf['name']}: {e}")
+    else:
+        d1, d2, d3, d4 = st.columns(4)
+        # Summary CSV
+        with d1:
+            if summary_path.exists():
                 st.download_button(
-                    f"📄 {ac.stem.replace('_', ' ').title()}",
-                    data=ac.read_bytes(),
-                    file_name=ac.name,
+                    "📋 Summary CSV",
+                    data=summary_path.read_bytes(),
+                    file_name="summary.csv",
                     mime="text/csv",
                     use_container_width=True,
-                    key=f"dl_{ac.name}",
                 )
 
-    # Plot downloads
-    with d3:
-        if plot_files:
-            for pf in plot_files:
-                st.download_button(
-                    f"📈 {pf.stem.replace('_', ' ').title()}",
-                    data=pf.read_bytes(),
-                    file_name=pf.name,
-                    mime="image/png",
-                    use_container_width=True,
-                    key=f"dl_{pf.name}",
-                )
-
-    # Snapshots download
-    with d4:
-        if snap_dir.exists():
-            snap_files_all = sorted(snap_dir.glob("*.png"))
-            for sf in snap_files_all:
-                st.download_button(
-                    f"🖼️ {sf.stem.replace('_', ' ').title()}",
-                    data=sf.read_bytes(),
-                    file_name=sf.name,
-                    mime="image/png",
-                    use_container_width=True,
-                    key=f"dl_snap_{sf.name}",
-                )
+        # Full angle CSVs
+        angle_csvs = sorted(out_dir.glob("angles_*.csv"))
+        with d2:
+            if angle_csvs:
+                for ac in angle_csvs:
+                    st.download_button(
+                        f"📄 {ac.stem.replace('_', ' ').title()}",
+                        data=ac.read_bytes(),
+                        file_name=ac.name,
+                        mime="text/csv",
+                        use_container_width=True,
+                        key=f"dl_{ac.name}",
+                    )
+    
+        # Plot downloads
+        with d3:
+            if plot_files:
+                for pf in plot_files:
+                    st.download_button(
+                        f"📈 {pf.stem.replace('_', ' ').title()}",
+                        data=pf.read_bytes(),
+                        file_name=pf.name,
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_{pf.name}",
+                    )
+    
+        # Snapshots download
+        with d4:
+            if snap_dir.exists():
+                snap_files_all = sorted(snap_dir.glob("*.png"))
+                for sf in snap_files_all:
+                    st.download_button(
+                        f"🖼️ {sf.stem.replace('_', ' ').title()}",
+                        data=sf.read_bytes(),
+                        file_name=sf.name,
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_snap_{sf.name}",
+                    )
 
 
 # ╔═════════════════════════════════════════════════════════════╗
@@ -1075,6 +1204,46 @@ def _render_full_processing():
     status_text.markdown("<h3 style='color: #10b981;'>✅ Processing Complete!</h3>", unsafe_allow_html=True)
     
     import json
+    import uuid
+    
+    # ── Supabase Upload ─────────────────────────────────────
+    analysis_id = str(uuid.uuid4())
+    user_id = st.session_state.user_id
+    csv_files = []
+    
+    # Clean NaNs in summary data for JSON DB insertion
+    db_summary_data = []
+    for d in all_summary_data:
+        clean_d = {k: (None if pd.isna(v) else v) for k, v in d.items()}
+        db_summary_data.append(clean_d)
+    
+    for pose_dir_item in out_dir.iterdir():
+        if pose_dir_item.is_dir():
+            for csv_file in pose_dir_item.glob("*.csv"):
+                storage_path = f"users/{user_id}/{analysis_id}/{pose_dir_item.name}/{csv_file.name}"
+                try:
+                    with open(csv_file, "rb") as f:
+                        supabase.storage.from_("analysis-results").upload(file=f, path=storage_path, file_options={"content-type": "text/csv"})
+                    csv_files.append({"name": f"{pose_dir_item.name}_{csv_file.name}", "path": storage_path, "pose_key": pose_dir_item.name})
+                except Exception as e:
+                    print(f"Storage Upload Error ({csv_file.name}): {e}")
+                    
+    try:
+        analysis_data = {
+            "id": analysis_id,
+            "user_id": user_id,
+            "assessment_type": "full_mwi",
+            "pose_name": None,
+            "summary_json": db_summary_data,
+            "csv_files": csv_files,
+            "created_at": str(pd.Timestamp.now())
+        }
+        supabase.table("analyses").insert(analysis_data).execute()
+        st.session_state.history_analysis_id = analysis_id
+        st.session_state.history_analysis_data = analysis_data
+    except Exception as e:
+        st.warning(f"Failed to save to cloud history: {e}")
+    
     with open(out_dir / "master_summary.json", "w") as f:
         json.dump(all_summary_data, f, indent=4)
         
@@ -1091,26 +1260,40 @@ def _render_full_processing():
 # ╚═════════════════════════════════════════════════════════════╝
 def _render_full_results():
     if st.button("🏠 New Assessment"):
+        st.session_state.history_analysis_id = None
+        st.session_state.history_analysis_data = None
         _go("landing")
         st.rerun()
+
+    is_hist = st.session_state.get("history_analysis_id") is not None
+    if is_hist:
+        hist_data = st.session_state.history_analysis_data
+        all_data = hist_data.get("summary_json", [])
+        csv_files = hist_data.get("csv_files", [])
+        dt_str = pd.to_datetime(hist_data['created_at']).strftime('%d %b %Y, %H:%M:%S')
+        sess_name = f"Historical Analysis ({dt_str})"
+        out_dir = Path("historical_run")
+    else:
+        out_dir = Path(st.session_state.full_results_dir)
+        json_path = out_dir / "master_summary.json"
         
-    out_dir = Path(st.session_state.full_results_dir)
-    json_path = out_dir / "master_summary.json"
-    
-    if not json_path.exists():
-        st.error("No summary data found for this session.")
-        return
-        
-    import json
-    with open(json_path, "r") as f:
-        all_data = json.load(f)
-        
-    if not all_data:
-        st.warning("No valid results were generated.")
-        return
+        if not json_path.exists():
+            st.error("No summary data found for this session.")
+            return
+            
+        import json
+        with open(json_path, "r") as f:
+            all_data = json.load(f)
+            
+        if not all_data:
+            st.warning("No valid results were generated.")
+            return
+            
+        sess_name = out_dir.name
+        csv_files = []
         
     st.markdown("## 🏆 Mobility Report Card")
-    st.caption(f"Session: {out_dir.name}")
+    st.caption(f"Session: {sess_name}")
     
     valid_mi4ls = [d["mi4l"] for d in all_data if d.get("mi4l_valid", str(d.get("mi4l_valid")) == "True") and pd.notna(d.get("mi4l"))]
     global_mi4l = sum(valid_mi4ls) / len(valid_mi4ls) if valid_mi4ls else None
@@ -1206,84 +1389,102 @@ def _render_full_results():
         # ── VISUALISATIONS ──────────────────────────────────────
         st.markdown('<div class="section-header">Visualisations</div>', unsafe_allow_html=True)
 
-        # Plots
-        plot_files = sorted(pose_dir.glob("plot_*.png"))
-        if plot_files:
-            plot_cols = st.columns(min(len(plot_files), 2))
-            for i, pf in enumerate(plot_files):
-                with plot_cols[i % len(plot_cols)]:
-                    st.image(str(pf), caption=pf.stem.replace("_", " ").title(), use_container_width=True)
+        if is_hist:
+            st.info("Visualisations (Plots & Snapshots) are currently only available for fresh local runs, not historical records.")
         else:
-            st.info("No plot images were generated.")
-
-        # Snapshots
-        snap_dir = pose_dir / "snapshots"
-        if snap_dir.exists():
-            snap_files = sorted(snap_dir.glob("*.png"))
-            if snap_files:
-                st.markdown("**Snapshots**")
-                snap_cols = st.columns(min(len(snap_files), 3))
-                for i, sf in enumerate(snap_files):
-                    with snap_cols[i % len(snap_cols)]:
-                        st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
+            # Plots
+            plot_files = sorted(pose_dir.glob("plot_*.png"))
+            if plot_files:
+                plot_cols = st.columns(min(len(plot_files), 2))
+                for i, pf in enumerate(plot_files):
+                    with plot_cols[i % len(plot_cols)]:
+                        st.image(str(pf), caption=pf.stem.replace("_", " ").title(), use_container_width=True)
+            else:
+                st.info("No plot images were generated.")
+    
+            # Snapshots
+            snap_dir = pose_dir / "snapshots"
+            if snap_dir.exists():
+                snap_files = sorted(snap_dir.glob("*.png"))
+                if snap_files:
+                    st.markdown("**Snapshots**")
+                    snap_cols = st.columns(min(len(snap_files), 3))
+                    for i, sf in enumerate(snap_files):
+                        with snap_cols[i % len(snap_cols)]:
+                            st.image(str(sf), caption=sf.stem.replace("_", " ").title(), use_container_width=True)
 
         # ── EXPORT / DOWNLOADS ──────────────────────────────────
+        # ── EXPORT / DOWNLOADS ──────────────────────────────────
         st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
-        d1, d2, d3, d4 = st.columns(4)
-
-        # Summary CSV
-        summary_path = pose_dir / "summary.csv"
-        with d1:
-            if summary_path.exists():
-                st.download_button(
-                    "📋 Summary CSV",
-                    data=summary_path.read_bytes(),
-                    file_name=f"{pose_key}_summary.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key=f"dl_sum_{pose_key}"
-                )
-
-        # Full angle CSVs
-        angle_csvs = sorted(pose_dir.glob("angles_*.csv"))
-        with d2:
-            if angle_csvs:
-                for ac in angle_csvs:
+        
+        if is_hist:
+            pose_csvs = [cf for cf in csv_files if cf.get("pose_key") == pose_key]
+            if pose_csvs:
+                st.markdown("📥 Download CSVs directly from Cloud Storage:")
+                for cf in pose_csvs:
+                    try:
+                        res = supabase.storage.from_("analysis-results").create_signed_url(cf["path"], 3600)
+                        url = res.get("signedURL")
+                        if url:
+                            st.markdown(f"- [**Download {cf['name']}**]({url})")
+                    except Exception as e:
+                        pass
+        else:
+            d1, d2, d3, d4 = st.columns(4)
+    
+            # Summary CSV
+            summary_path = pose_dir / "summary.csv"
+            with d1:
+                if summary_path.exists():
                     st.download_button(
-                        f"📄 {ac.stem.replace('_', ' ').title()}",
-                        data=ac.read_bytes(),
-                        file_name=f"{pose_key}_{ac.name}",
+                        "📋 Summary CSV",
+                        data=summary_path.read_bytes(),
+                        file_name=f"{pose_key}_summary.csv",
                         mime="text/csv",
                         use_container_width=True,
-                        key=f"dl_ang_{pose_key}_{ac.name}",
+                        key=f"dl_sum_{pose_key}"
                     )
-
-        # Plot downloads
-        with d3:
-            if plot_files:
-                for pf in plot_files:
-                    st.download_button(
-                        f"📈 {pf.stem.replace('_', ' ').title()}",
-                        data=pf.read_bytes(),
-                        file_name=f"{pose_key}_{pf.name}",
-                        mime="image/png",
-                        use_container_width=True,
-                        key=f"dl_plt_{pose_key}_{pf.name}",
-                    )
-
-        # Snapshots download
-        with d4:
-            if snap_dir.exists():
-                snap_files_all = sorted(snap_dir.glob("*.png"))
-                for sf in snap_files_all:
-                    st.download_button(
-                        f"🖼️ {sf.stem.replace('_', ' ').title()}",
-                        data=sf.read_bytes(),
-                        file_name=f"{pose_key}_{sf.name}",
-                        mime="image/png",
-                        use_container_width=True,
-                        key=f"dl_snp_{pose_key}_{sf.name}",
-                    )
+    
+            # Full angle CSVs
+            angle_csvs = sorted(pose_dir.glob("angles_*.csv"))
+            with d2:
+                if angle_csvs:
+                    for ac in angle_csvs:
+                        st.download_button(
+                            f"📄 {ac.stem.replace('_', ' ').title()}",
+                            data=ac.read_bytes(),
+                            file_name=f"{pose_key}_{ac.name}",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"dl_ang_{pose_key}_{ac.name}",
+                        )
+    
+            # Plot downloads
+            with d3:
+                if plot_files:
+                    for pf in plot_files:
+                        st.download_button(
+                            f"📈 {pf.stem.replace('_', ' ').title()}",
+                            data=pf.read_bytes(),
+                            file_name=f"{pose_key}_{pf.name}",
+                            mime="image/png",
+                            use_container_width=True,
+                            key=f"dl_plt_{pose_key}_{pf.name}",
+                        )
+    
+            # Snapshots download
+            with d4:
+                if snap_dir.exists():
+                    snap_files_all = sorted(snap_dir.glob("*.png"))
+                    for sf in snap_files_all:
+                        st.download_button(
+                            f"🖼️ {sf.stem.replace('_', ' ').title()}",
+                            data=sf.read_bytes(),
+                            file_name=f"{pose_key}_{sf.name}",
+                            mime="image/png",
+                            use_container_width=True,
+                            key=f"dl_snp_{pose_key}_{sf.name}",
+                        )
         
         st.write("")
         st.markdown("---")
@@ -1302,4 +1503,95 @@ _SCREENS = {
     "full_results": _render_full_results,
 }
 
-_SCREENS.get(st.session_state.screen, _render_landing)()
+from mi4l.supabase_client import get_supabase_client
+try:
+    supabase = get_supabase_client()
+except Exception as e:
+    st.error(f"Supabase Configuration Error: {e}")
+    st.stop()
+
+import extra_streamlit_components as stx
+
+cookie_manager = stx.CookieManager()
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = None
+if "history_analysis_data" not in st.session_state:
+    st.session_state.history_analysis_data = {}
+
+# Attempt to grab tokens from cookies if session state is empty (e.g. page refresh)
+if not st.session_state.access_token:
+    c_access = cookie_manager.get(cookie="access_token")
+    c_refresh = cookie_manager.get(cookie="refresh_token")
+    if c_access and c_refresh:
+        st.session_state.access_token = c_access
+        st.session_state.refresh_token = c_refresh
+
+# Always restore the Supabase authentication context for this active rerun
+if st.session_state.access_token and st.session_state.refresh_token:
+    try:
+        supabase.auth.set_session(st.session_state.access_token, st.session_state.refresh_token)
+        user_obj = supabase.auth.get_user()
+        if user_obj and user_obj.user:
+            st.session_state.user_id = user_obj.user.id
+    except Exception:
+        # Token likely expired
+        st.session_state.user_id = None
+        st.session_state.access_token = None
+        st.session_state.refresh_token = None
+
+def _render_auth():
+    st.markdown("<h2 style='text-align: center; margin-top: 3rem;'>MWI Mobility Analysis Login</h2>", unsafe_allow_html=True)
+    with st.container():
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            with st.container(border=True):
+                st.info("Sign up or log in to sync your mobility history to the cloud.")
+                email = st.text_input("Email")
+                password = st.text_input("Password", type="password")
+                st.write("")
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Login", use_container_width=True):
+                        try:
+                            res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                            st.session_state.user_id = res.user.id
+                            st.session_state.access_token = res.session.access_token
+                            st.session_state.refresh_token = res.session.refresh_token
+                            cookie_manager.set("access_token", res.session.access_token, max_age=86400 * 30)
+                            cookie_manager.set("refresh_token", res.session.refresh_token, max_age=86400 * 30)
+                            time.sleep(0.5) # allow cookies to set
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Login failed: {e}")
+                with col_btn2:
+                    if st.button("Sign Up", use_container_width=True):
+                        try:
+                            res = supabase.auth.sign_up({"email": email, "password": password})
+                            st.success("Signup successful! You can now log in.")
+                        except Exception as e:
+                            st.error(f"Signup failed: {e}")
+
+if not st.session_state.user_id:
+    _render_auth()
+else:
+    # Render logout button in sidebar
+    with st.sidebar:
+        if st.button("Log Out"):
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            cookie_manager.delete("access_token")
+            cookie_manager.delete("refresh_token")
+            st.session_state.user_id = None
+            st.session_state.access_token = None
+            st.session_state.refresh_token = None
+            time.sleep(0.5)
+            st.rerun()
+            
+    _SCREENS.get(st.session_state.screen, _render_landing)()
