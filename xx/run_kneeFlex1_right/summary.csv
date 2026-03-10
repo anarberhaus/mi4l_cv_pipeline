@@ -1,3 +1,0 @@
-joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
-kneeling_knee_flexion,left,96.08059692382812,87.88302612304688,,1.0,1.0,False,mi4l:prom_lt_arom:87.883+2.000<96.081
-kneeling_knee_flexion,right,59.328067779541016,78.93211364746094,0.2483659053586048,1.0,1.0,True,

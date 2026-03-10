@@ -8,3 +8,9 @@ pandas>=2.0
 numpy>=1.24
 scipy>=1.11
 matplotlib>=3.8
+streamlit>=1.30
+pyyaml>=6.0
+supabase
+extra-streamlit-components
+plotly
+python-dotenv

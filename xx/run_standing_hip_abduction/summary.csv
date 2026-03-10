@@ -1,3 +1,0 @@
-joint,side,arom_deg,prom_deg,mi4l,arom_confidence,prom_confidence,mi4l_valid,qc_flags
-standing_hip_abduction,left,4.148651123046875,3.652587890625,-0.13581144308535525,1.0,1.0,True,
-standing_hip_abduction,right,38.643402099609375,49.878173828125,0.22524424745840696,1.0,1.0,True,

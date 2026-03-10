@@ -1,18 +1,31 @@
 # data / outputs
 data/
-results_testing/
 results/
-prompt.md
-run_all_poses.bat
+results_testing/
+xx/
+
+
+# scratch / docs
+scratch/
+docs/
+
+# reference docs (large binary)
+poses.pdf
+context.md
+dim_images.py
+
+# video files
 *.mp4
 *.mov
 *.avi
 
 # python junk
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 
 # venv / env
 .venv/
@@ -25,5 +38,3 @@ Thumbs.db
 
 # logs
 *.log
-
-*.egg-info/
