@@ -25,15 +25,16 @@ This represents the core engine of the system.
 - `viz/`: Snapshot image generation (drawing lines/wedges onto detected poses) and time-series matplotlib plotting. 
 - `io/`: Data reading/writing utilities for video metadata and metric exports (CSVs).
 
-### Execution \u0026 UIs
-- `app.py`: The root Streamlit application. Provides a rich visual interface for uploading MP4 files, configuring execution parameters, running subprocess calls to the CLI runner, and visually displaying the output CSVs and snapshot PNGs.
+### Execution & UIs
+- `app.py`: The root Streamlit application. Provides a rich visual interface, including **Supabase authentication** for user sessions, cloud persistence for analysis history, global dark-mode styling, and a complete multi-pose assessment flow. It utilizes `subprocess` to trigger the underlying pipeline engine safely.
 - `scripts/run_mi4l.py`: The single-pose CLI entrypoint. Takes raw arguments for AROM/PROM paths, pose configuration, and side, saving artifacts to the `results/` folder.
-- `scripts/run_all.py` \u0026 `scripts/run_all_poses.bat`: Automation wrappers that sequentially execute `.mp4` tests against all predefined pose settings.
+- `scripts/run_all.py` & `scripts/run_all_poses.bat`: Automation wrappers that sequentially execute `.mp4` tests against all predefined pose settings.
 - `scripts/debug_landmarks.py`: Diagnostic utility for verifying precise MediaPipe outputs on specific frames.
 
-### Configuration \u0026 Data
+### Configuration, Data & Deployment
 - `configs/default.yaml`: Global parameter settings for the pipeline (smoothing models, frame-stride, minimal confidence bounds, etc).
-- `data/` \u0026 `results/`: Local untracked storage for raw inputs and pipeline artifacts.
+- `Dockerfile` & `packages.txt`: Deployment configurations defining OS-level libraries (`libgl1`, `libglib2.0-0`) required for MediaPipe and OpenCV on Linux servers (e.g., Render, Streamlit Cloud).
+- `data/` & `results/`: Local untracked storage for raw inputs and pipeline artifacts.
 
 ---
 

@@ -28,6 +28,7 @@ mi4l_cv_pipeline/
 │   ├── metrics/      # AROM/PROM estimation, MI4L, summary metrics
 │   ├── pose/         # MediaPipe landmark extraction
 │   ├── qc/           # Quality-control rules and flags
+│   ├── supabase_client.py # Supabase integration logic
 │   ├── utils/        # Config loading, helpers
 │   └── viz/          # Plots and snapshot export
 ├── scripts/
@@ -39,19 +40,28 @@ mi4l_cv_pipeline/
 │   ├── arom/         # AROM video files go here
 │   ├── prom/         # PROM video files go here
 │   └── other/        # Videos that are neither arom nor prom
-├── results/          # Pipeline outputs (gitignored)
+├── results/          # Local pipeline outputs (gitignored)
 ├── tests/            # Unit tests
-└── requirements.txt  # Python dependencies
+├── app.py            # Streamlit GUI for analysis and history tracking
+├── Dockerfile        # Docker setup for Render / Linux deployments
+├── requirements.txt  # Python dependencies (pip)
+└── packages.txt      # OS-level dependencies (apt-get)
 ```
 
 ---
 
-## Setup (recommended: conda)
+## Setup
 
-> **Why conda?**
-> MediaPipe requires Python 3.10 or 3.11 and a pip-installed version of the package. Using conda lets you isolate the correct Python version from whatever else is on your system, which is the most reliable way to get everything working.
+> **Note on MediaPipe Compatibility:**
+> This repository strictly pins `mediapipe==0.10.14` and relies on Python 3.10. MediaPipe versions >= 0.10.30 have removed the Legacy Solutions API, which this pipeline is built upon. 
 
-### Option A: conda (recommended)
+You need a Supabase project to use the Streamlit interface. Create a `.env` file in the root directory:
+```env
+SUPABASE_URL="your-project-url"
+SUPABASE_KEY="your-anon-key"
+```
+
+### Option A: Local Conda (Windows/Mac)
 
 ```bash
 # 1. Create a dedicated environment with Python 3.10
@@ -94,7 +104,16 @@ pip install -e .
 python -c "import mediapipe as mp; mp.solutions.pose.PoseLandmark; print('All good!')"
 ```
 
-If this prints `All good!` you are set. If it raises an error, make sure you are in the right environment and that mediapipe was installed via `pip` (not conda-forge).
+If this prints `All good!` you are set. If you get an `AttributeError` regarding `solutions`, you are not on `mediapipe==0.10.14`.
+
+### Option C: Docker (Server Deployment)
+
+For deploying to services like Render, we use the provided `Dockerfile` built on `python:3.10-slim`.
+This automatically installs the required Linux graphics drivers (`libgl1`, `libsm6`, `libxext6`) needed to initialize MediaPipe's C++ backends.
+```bash
+docker build -t mi4l_app .
+docker run -p 8501:8501 --env-file .env mi4l_app
+```
 
 ---
 
@@ -102,10 +121,19 @@ If this prints `All good!` you are set. If it raises an error, make sure you are
 
 **All commands are run from the project root directory.**
 
-```bash
-# Activate environment first
-conda activate mi4l   # or source .venv/bin/activate
+### Launching the Web Interface
+The recommended way to use the pipeline is via the Streamlit GUI. It includes Supabase authentication, session persistence, and a dark-mode video processing UI.
 
+```bash
+# Ensure your .env file exists with Supabase credentials
+conda activate mi4l
+streamlit run app.py
+```
+
+### Running CLI Commands
+For headless batch processing:
+
+```bash
 # Run a single pose (example: right knee flexion)
 python scripts/run_mi4l.py \
   --arom  data/arom/knee_flex_ra.mp4 \
@@ -119,7 +147,7 @@ python scripts/run_mi4l.py \
 python scripts/run_all.py
 ```
 
-Results are saved to the folder specified by `--out` (or to `results/<pose>/` when using `run_all.py`).
+Results are saved to the folder specified by `--out` (or to `results/<pose>/` when using `run_all.py`). When using the GUI, results are automatically uploaded to your Supabase project.
 
 ---
 
