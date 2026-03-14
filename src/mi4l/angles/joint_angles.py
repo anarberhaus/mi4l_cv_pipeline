@@ -425,9 +425,9 @@ def compute_stick_pass_through_metrics(landmarks_df: pd.DataFrame) -> pd.DataFra
     shoulder_dist = np.linalg.norm(l_s - r_s, axis=1)
     
     with np.errstate(invalid="ignore", divide="ignore"):
-        norm_dist = wrist_dist / shoulder_dist
-        
-    invalid = (shoulder_dist <= 0) | np.isnan(shoulder_dist)
+        norm_dist = shoulder_dist / wrist_dist
+
+    invalid = (wrist_dist <= 0) | np.isnan(wrist_dist) | (shoulder_dist <= 0) | np.isnan(shoulder_dist)
     norm_dist[invalid] = np.nan
 
     out = pd.DataFrame(

@@ -570,7 +570,10 @@ def save_snapshot(
     # --- text badge ---
     if angle_deg is not None and B is not None:
         if mode == "distance":
-            txt = f"{float(angle_deg):.2f}x shoulder"
+            # angle_deg stores shoulder/wrist; invert to show grip as a multiple of shoulder width
+            val = float(angle_deg)
+            grip_multiple = (1.0 / val) if val > 0 else float("inf")
+            txt = f"{grip_multiple:.2f}x shoulder"
         else:
             txt = f"{float(angle_deg):.1f} deg"
         anchor = _badge_anchor(A, B, C, mode, frame.shape)

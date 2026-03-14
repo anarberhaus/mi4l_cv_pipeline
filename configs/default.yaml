@@ -53,7 +53,8 @@ peak_detection:
 stable_plateau:
   stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
   stability_threshold: 0.15     # max rolling std to be considered "stable"
-  min_value_threshold: 1.2      # minimum normalized value (e.g. 1.2x shoulder width)
+  min_value_threshold: 1.2      # direction=max: only frames above this are candidates
+  max_value_threshold: 0.9      # direction=min: only frames below this are candidates (shoulder/wrist during exercise ~0.3; rest ~1.5)
   min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:

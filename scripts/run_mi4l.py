@@ -184,12 +184,16 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         # Distance metrics (e.g. stick pass-through) use stable plateau detection
         if col_name.endswith("_dist_norm"):
             plateau_cfg = cfg.get("stable_plateau", {}) or {}
+            # shoulder_stick_pass_through reports shoulder/wrist (lower = wider grip =
+            # exercise moment), so we look for the lowest stable plateau, not the highest.
+            plateau_direction = "min" if pose_name == "shoulder_stick_pass_through" else "max"
             return estimate_stable_plateau(
                 series=angles_df[col_name],
                 valid_mask=valid_mask,
                 smoothing_cfg=smooth_cfg,
                 plateau_cfg=plateau_cfg,
                 qc_cfg=qc_cfg,
+                direction=plateau_direction,
             )
         # Angle metrics use topk robust max/min
         direction = "max"
@@ -635,7 +639,29 @@ def main(argv: list[str] | None = None) -> int:
             )
             # side already in row; avoid overwriting
             ext.pop("side", None)
-            row.update(ext)
+
+            if args.pose == "shoulder_stick_pass_through":
+                # This pose reports a grip-width ratio, not AROM/PROM degrees.
+                # Build a purpose-specific row: drop irrelevant AROM/PROM/MI4L columns
+                # and expose the metric under clear, self-describing names.
+                stored_val = arom_est.value_deg  # shoulder/wrist (0.30 → higher = better)
+                grip_multiple = (1.0 / stored_val) if stored_val and stored_val > 0 else None
+                row = {
+                    "movement_name": ext.get("movement_name"),
+                    "joint_name": ext.get("joint_name"),
+                    "angle_type": ext.get("angle_type"),
+                    "side": "both",
+                    "grip_width_shoulder_widths": grip_multiple,   # e.g. 3.30 — intuitive display value
+                    "grip_ratio_normalized": stored_val,           # e.g. 0.30 — 1.0 = shoulder-width grip (best)
+                    "confidence": arom_est.confidence,
+                    "qc_flags": row["qc_flags"],
+                    "plateau_duration_s": ext.get("peak_hold_time_s"),
+                    "frames_valid_pct": ext.get("frames_valid_pct"),
+                    "avg_landmark_visibility": ext.get("avg_landmark_visibility"),
+                }
+            else:
+                row.update(ext)
+
             rows.append(row)
     else:
         # Sided pose: iterate over active sides
@@ -711,7 +737,9 @@ def main(argv: list[str] | None = None) -> int:
     _COLUMN_ORDER = [
         # Metadata (front)
         "movement_name", "joint_name", "angle_type", "side",
-        # Core ROM metrics
+        # Stick pass-through specific (only present for shoulder_stick_pass_through)
+        "grip_width_shoulder_widths", "grip_ratio_normalized", "confidence", "plateau_duration_s",
+        # Core ROM metrics (standard poses)
         "arom_deg", "prom_deg", "mi4l",
         "arom_confidence", "prom_confidence", "mi4l_valid", "qc_flags",
         # Derived
@@ -735,13 +763,19 @@ def main(argv: list[str] | None = None) -> int:
     # Console summary (short)
     for _, r in summary_df.iterrows():
         name = str(r.get("movement_name", ""))
-        side = str(r["side"]).upper()
-        arom = r["arom_deg"]
-        prom = r["prom_deg"]
-        mi4l = r["mi4l"]
-        valid = bool(r["mi4l_valid"])
-        flags = str(r["qc_flags"])
-        print(f"[{name} | {side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
+        side = str(r.get("side", "")).upper()
+        flags = str(r.get("qc_flags", ""))
+        if args.pose == "shoulder_stick_pass_through":
+            grip = r.get("grip_width_shoulder_widths")
+            norm = r.get("grip_ratio_normalized")
+            conf = r.get("confidence")
+            print(f"[{name} | {side}] Grip={grip!s}x shoulder | Normalized={norm!s} | Confidence={conf!s} | flags={flags}")
+        else:
+            arom = r.get("arom_deg")
+            prom = r.get("prom_deg")
+            mi4l = r.get("mi4l")
+            valid = bool(r.get("mi4l_valid", False))
+            print(f"[{name} | {side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
 
     return 0
 

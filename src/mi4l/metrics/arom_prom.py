@@ -348,18 +348,25 @@ def estimate_stable_plateau(
     smoothing_cfg: dict[str, Any],
     plateau_cfg: dict[str, Any],
     qc_cfg: dict[str, Any],
+    direction: str = "max",
 ) -> RobustMaxResult:
     """
-    Find the most stable plateau in `series` that is also above a minimum value
-    threshold. Intended for metrics like stick pass-through where the key value
-    is a stable holding period (e.g. the starting grip width), not the global
-    max or min.
+    Find the most stable plateau in `series` within a value range determined by
+    `direction`.
+
+    direction="max" (default): looks for plateaus above `min_value_threshold`.
+        Used when the metric is highest during the active movement (e.g. old
+        wrist/shoulder ratio).
+    direction="min": looks for plateaus below `max_value_threshold`. Used when
+        the metric is lowest during the active movement (e.g. shoulder/wrist
+        ratio, where a narrower grip = higher score but the exercise period
+        produces the lowest values).
 
     Algorithm:
       1. Smooth the series.
-      2. Compute a rolling std over `stability_window_sec` seconds.
+      2. Compute a rolling std over `stability_window_frames` frames.
       3. Mark frames as "stable" where rolling_std < stability_threshold AND
-         value > min_value_threshold AND valid_mask is True.
+         value is within the direction-appropriate range AND valid_mask is True.
       4. Find the longest contiguous run of stable frames.
       5. Return the median of that run as the estimate.
     """
@@ -370,10 +377,15 @@ def estimate_stable_plateau(
         return RobustMaxResult(value_deg=None, confidence=0.0, n_total=0, n_valid=0, n_used=0, flags=["empty_series"])
 
     # --- Config ---
-    stability_window_sec: float = float(plateau_cfg.get("stability_window_sec", 2.0))
     stability_threshold: float = float(plateau_cfg.get("stability_threshold", 0.15))
-    min_value_threshold: float = float(plateau_cfg.get("min_value_threshold", 1.2))
     min_plateau_frames: int = int(plateau_cfg.get("min_plateau_frames", 10))
+
+    if direction == "min":
+        max_value_threshold: float = float(plateau_cfg.get("max_value_threshold", 0.9))
+        value_filter_label = f"no_values_below_threshold:{max_value_threshold}"
+    else:
+        min_value_threshold: float = float(plateau_cfg.get("min_value_threshold", 1.2))
+        value_filter_label = f"no_values_above_threshold:{min_value_threshold}"
 
     # --- 1. Smooth ---
     smoothed = smooth_angle_series(series, smoothing_cfg=smoothing_cfg)
@@ -390,10 +402,6 @@ def estimate_stable_plateau(
         return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + ["no_valid_values"])
 
     # --- 2. Rolling std ---
-    # Estimate fps from time column if available, else assume 30fps
-    # We work in frame-space: convert stability_window_sec to frames
-    # Use a simple heuristic: window = max(3, stability_window_sec * estimated_fps)
-    # We can't know fps here, so we use a frame count directly from config
     stability_window_frames: int = int(plateau_cfg.get("stability_window_frames", 30))
 
     smoothed_series = pd.Series(values)
@@ -404,12 +412,17 @@ def estimate_stable_plateau(
     ).std().to_numpy(dtype=float)
 
     # --- 3. Stability + threshold mask ---
+    if direction == "min":
+        value_ok = values < max_value_threshold
+    else:
+        value_ok = values > min_value_threshold
+
     stable = (
         vm
         & np.isfinite(values)
         & np.isfinite(rolling_std)
         & (rolling_std < stability_threshold)
-        & (values > min_value_threshold)
+        & value_ok
     )
 
     # --- 4. Find longest contiguous run ---
@@ -421,16 +434,15 @@ def estimate_stable_plateau(
 
     if len(starts) == 0:
         flags.append("no_stable_plateau_found")
-        # Fallback: use all valid frames above threshold
-        fallback_ok = vm & np.isfinite(values) & (values > min_value_threshold)
+        fallback_ok = vm & np.isfinite(values) & value_ok
         if fallback_ok.sum() == 0:
-            return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + ["no_values_above_threshold"])
+            return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + [value_filter_label])
         fallback_vals = values[fallback_ok]
         est = float(np.nanmedian(fallback_vals))
         fallback_idx = np.nonzero(fallback_ok)[0]
         idx_labels = series.index.to_numpy()
         frames_used = [int(idx_labels[i]) for i in fallback_idx]
-        confidence = 0.3  # low confidence for fallback
+        confidence = 0.3
         return RobustMaxResult(value_deg=est, confidence=confidence, n_total=n_total, n_valid=n_valid, n_used=len(fallback_idx), flags=flags, frames_used=frames_used)
 
     # Pick the longest run
