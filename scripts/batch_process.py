@@ -285,14 +285,14 @@ def main(argv: list[str] | None = None) -> int:
     for pdir in participant_dirs:
         print(f"\nScanning {pdir.name}...")
         jobs = _assemble_jobs(pdir, out_root)
-        print(f"  → {len(jobs)} job(s)")
+        print(f"  -> {len(jobs)} job(s)")
         all_jobs.extend(jobs)
 
     if not all_jobs:
         print("[ERROR] No jobs to run.")
         return 1
 
-    print(f"\nTotal jobs: {len(all_jobs)}\n{'─' * 60}")
+    print(f"\nTotal jobs: {len(all_jobs)}\n{'-' * 60}")
 
     # Run all jobs, collect summaries
     all_summaries: list[pd.DataFrame] = []
@@ -314,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             n_fail += 1
 
     # Merge and write combined summary
-    print(f"\n{'─' * 60}")
+    print(f"\n{'-' * 60}")
     print(f"Completed: {n_ok} ok, {n_fail} failed")
 
     if all_summaries:
