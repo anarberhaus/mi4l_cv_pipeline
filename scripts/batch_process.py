@@ -63,9 +63,11 @@ FILE_MAP: dict[str, tuple[str, str, str]] = {
     "hipabd_lp":         ("standing_hip_abduction",      "left",  "prom"),
     "hipabd_ra":         ("standing_hip_abduction",      "right", "arom"),
     "hipabd_rp":         ("standing_hip_abduction",      "right", "prom"),
-    "hipextension_la":   ("unilateral_hip_extension",    "left",  "arom"),
-    "hipextension_ra":   ("unilateral_hip_extension",    "right", "arom"),
-    # frontsplit is the bilateral PROM for hip extension — used for both sides
+    # Both la/ra AROM videos are side="both" — the calculation is bilateral
+    # (angle between legs); whichever file exists is used.  If a participant
+    # recorded both, hipextension_ra (alphabetically last) wins — that is fine.
+    "hipextension_la":   ("unilateral_hip_extension",    "both",  "arom"),
+    "hipextension_ra":   ("unilateral_hip_extension",    "both",  "arom"),
     "frontsplit":        ("unilateral_hip_extension",    "both",  "prom"),
     "shoulder_la":       ("shoulder_flexion",            "left",  "arom"),
     "shoulder_lp":       ("shoulder_flexion",            "left",  "prom"),
@@ -115,9 +117,6 @@ def _find_videos(participant_dir: Path) -> dict[str, Path]:
 def _assemble_jobs(participant_dir: Path, out_base: Path) -> list[Job]:
     """
     Scan one participant folder and return one Job per (pose, side) pair.
-
-    Hip extension is special: frontsplit (PROM) covers both left and right.
-    The left-AROM job gets frontsplit as PROM, and so does the right-AROM job.
     """
     participant = participant_dir.name
     videos = _find_videos(participant_dir)
@@ -148,11 +147,9 @@ def _assemble_jobs(participant_dir: Path, out_base: Path) -> list[Job]:
         if arom_path is None:
             continue
 
-        # Resolve PROM: direct match first, then bilateral fallback for hip extension
+        # Resolve PROM: direct match (AROM is already side="both" for hip extension,
+        # so this also finds frontsplit which is registered as side="both")
         prom_path = lookup.get((pose, side, "prom"))
-        if prom_path is None and pose == "unilateral_hip_extension":
-            # frontsplit is registered as (pose, "both", "prom")
-            prom_path = lookup.get((pose, "both", "prom"))
 
         if prom_path is None and pose not in AROM_ONLY_POSES:
             print(f"  [WARN] {participant} | {pose} {side}: AROM found but no PROM — running AROM only")
@@ -237,6 +234,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--participants", nargs="*", default=None,
         help="Optional list of participant folder names to process. Processes all if omitted.",
     )
+    p.add_argument(
+        "--snapshots", action="store_true", default=False,
+        help="Enable snapshots and plots in the batch output (disabled by default for speed).",
+    )
     return p.parse_args(argv)
 
 
@@ -253,13 +254,17 @@ def main(argv: list[str] | None = None) -> int:
 
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # Build a batch-specific config: disable snapshots and plots (not needed
-    # for statistical analysis; keeps output clean and processing faster).
+    # Build a batch-specific config that inherits all defaults but can
+    # toggle snapshots/plots on or off.
     with open(config_path, encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
     batch_cfg = copy.deepcopy(base_cfg)
-    batch_cfg.setdefault("export", {})["save_snapshots"] = False
-    batch_cfg.setdefault("export", {}).setdefault("plots", {})["enabled"] = False
+    if args.snapshots:
+        batch_cfg.setdefault("export", {})["save_snapshots"] = True
+        batch_cfg.setdefault("export", {}).setdefault("plots", {})["enabled"] = True
+    else:
+        batch_cfg.setdefault("export", {})["save_snapshots"] = False
+        batch_cfg.setdefault("export", {}).setdefault("plots", {})["enabled"] = False
     batch_config_path = str(out_root / "_batch_config.yaml")
     with open(batch_config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(batch_cfg, f, sort_keys=False)

@@ -50,6 +50,20 @@ peak_detection:
   movement_buffer_frames: 5    # frames to trim inward from detected window edges
   fallback_top_percent: 0.20   # top fraction of window values used for the fallback estimate
 
+clip_angle_range:
+  min: null   # exclude frames below this value (null = disabled)
+  max: null   # exclude frames above this value (null = disabled)
+
+noise_filter:
+  enabled: true
+  rolling_window_frames: 15   # ~0.5 s at 30 fps — window for rolling std computation
+  max_rolling_std: 20.0       # deg — frames with higher local variability are excluded
+
+movement_window:
+  enabled: true
+  slope_threshold: 2.0      # deg/frame – minimum |derivative| to count as active movement
+  buffer_frames: 5          # frames to trim inward from detected window edges
+
 stable_plateau:
   stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
   stability_threshold: 0.15     # max rolling std to be considered "stable"
@@ -73,3 +87,11 @@ export:
   plots:
     enabled: true
     dpi: 150
+
+pose_overrides:
+  kneeling_knee_flexion:
+    # After fold-at-90 normalization the angle is already in [0, 90].
+    # This clip is a secondary safety net: discard any residual artifact frames
+    # where the angle is above the physiological maximum for this movement.
+    clip_angle_range:
+      max: 90

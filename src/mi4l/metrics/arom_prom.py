@@ -68,6 +68,116 @@ def smooth_angle_series(angle_deg: pd.Series, smoothing_cfg: dict[str, Any]) -> 
     raise ValueError(f"Unknown smoothing method: {method}")
 
 
+def trim_valid_mask_to_movement_window(
+    series: pd.Series,
+    valid_mask: pd.Series,
+    cfg: "dict[str, Any]",
+    smoothing_cfg: "dict[str, Any]",
+    direction: str = "max",
+) -> pd.Series:
+    """
+    Pre-filter: restrict valid_mask to the window of active movement by
+    detecting onset and end via the derivative of the smoothed angle series.
+
+    Algorithm
+    ---------
+    1. Smooth the series.
+    2. Compute frame-to-frame derivative; smooth it with a rolling window.
+    3. Find the candidate peak = argmax (direction="max") or argmin
+       (direction="min") of the smoothed valid values.
+    4. Scan BACKWARD from the peak: find the last frame whose |derivative|
+       exceeds slope_threshold → that is the movement onset.
+    5. Scan FORWARD from the peak: find the first frame after the peak whose
+       |derivative| exceeds slope_threshold (the return phase) → movement end.
+    6. Apply buffer_frames inward on both sides.
+    7. Return a copy of valid_mask with False outside [onset, end].
+
+    If onset/end cannot be determined the original valid_mask is returned
+    unchanged (conservative fallback – no frames are incorrectly removed).
+    """
+    slope_threshold: float = float(cfg.get("slope_threshold", 2.0))
+    buffer: int = int(cfg.get("buffer_frames", 5))
+
+    smoothed = smooth_angle_series(series, smoothing_cfg=smoothing_cfg)
+    vm = valid_mask.fillna(False).to_numpy(dtype=bool)
+    values = smoothed.to_numpy(dtype=float)
+    n = len(values)
+
+    if n < 3:
+        return valid_mask
+
+    ok = vm & np.isfinite(values)
+    if ok.sum() == 0:
+        return valid_mask
+
+    # Derivative + light smoothing
+    deriv = np.zeros(n, dtype=float)
+    deriv[:-1] = np.diff(values)
+    deriv[~ok] = 0.0
+    deriv_s = pd.Series(deriv).rolling(window=3, center=True, min_periods=1).mean().to_numpy()
+
+    # Peak frame
+    valid_vals = np.where(ok, values, np.nan)
+    if direction == "min":
+        peak_idx = int(np.nanargmin(valid_vals))
+    else:
+        peak_idx = int(np.nanargmax(valid_vals))
+
+    # Onset: last frame BEFORE peak where |deriv| >= slope_threshold
+    pre_peak = np.abs(deriv_s[:peak_idx])
+    strong_pre = np.where(pre_peak >= slope_threshold)[0]
+    onset = int(strong_pre[0]) if strong_pre.size > 0 else 0
+
+    # End: first frame AFTER peak where |deriv| >= slope_threshold (return phase)
+    post_peak = np.abs(deriv_s[peak_idx:])
+    strong_post = np.where(post_peak >= slope_threshold)[0]
+    # Skip the peak frame itself (index 0 in the slice)
+    valid_post = strong_post[strong_post > 0]
+    end = (peak_idx + int(valid_post[0])) if valid_post.size > 0 else (n - 1)
+
+    # Apply inward buffer
+    onset = min(onset + buffer, peak_idx)
+    end = max(end - buffer, peak_idx)
+
+    if end <= onset:
+        return valid_mask
+
+    new_mask_arr = valid_mask.to_numpy(dtype=bool).copy()
+    new_mask_arr[:onset] = False
+    new_mask_arr[end + 1:] = False
+    return pd.Series(new_mask_arr, index=valid_mask.index)
+
+
+def trim_valid_mask_by_rolling_std(
+    series: pd.Series,
+    valid_mask: pd.Series,
+    cfg: "dict[str, Any]",
+) -> pd.Series:
+    """
+    Pre-filter: exclude frames where the local angle variability is too high.
+
+    A rolling standard deviation is computed over the raw angle series.
+    Any frame whose rolling_std exceeds max_rolling_std is masked out.
+    This removes artifact / prep-phase frames (e.g. wild spikes before
+    the participant settles into position) so that downstream peak
+    detection anchors to the actual smooth movement.
+
+    Typical calibration (30 fps):
+      - Noisy prep / artifact region: rolling std >> 20 deg  -> excluded
+      - Smooth movement plateau:       rolling std <  10 deg  -> kept
+    """
+    window: int = int(cfg.get("rolling_window_frames", 15))
+    max_std: float = float(cfg.get("max_rolling_std", 20.0))
+
+    rolling_std = (
+        series.rolling(window=window, center=True, min_periods=1)
+        .std()
+        .fillna(float("inf"))
+    )
+    stable_mask = rolling_std <= max_std
+    return valid_mask & stable_mask
+
+
 def estimate_movement_window_fallback(
     values: np.ndarray,
     ok: np.ndarray,

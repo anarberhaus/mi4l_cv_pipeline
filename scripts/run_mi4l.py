@@ -22,7 +22,7 @@ from mi4l.io.export import (
     save_landmarks_csv,
     save_summary_csv,
 )
-from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau, smooth_angle_series
+from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau, smooth_angle_series, trim_valid_mask_by_rolling_std, trim_valid_mask_to_movement_window
 from mi4l.metrics.mi4l import compute_mi4l
 from mi4l.metrics.summary_metrics import compute_extended_summary
 from mi4l.pose.mediapipe_pose import extract_mediapipe_pose_landmarks
@@ -181,11 +181,10 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         if valid_mask is None:
             base = col_name.rsplit("_", 2)[0]
             valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
+
         # Distance metrics (e.g. stick pass-through) use stable plateau detection
         if col_name.endswith("_dist_norm"):
             plateau_cfg = cfg.get("stable_plateau", {}) or {}
-            # shoulder_stick_pass_through reports shoulder/wrist (lower = wider grip =
-            # exercise moment), so we look for the lowest stable plateau, not the highest.
             plateau_direction = "min" if pose_name == "shoulder_stick_pass_through" else "max"
             return estimate_stable_plateau(
                 series=angles_df[col_name],
@@ -195,9 +194,44 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 qc_cfg=qc_cfg,
                 direction=plateau_direction,
             )
-        # Angle metrics use topk robust max/min
+
+        # --- Pre-filters for angle metrics ---
         direction = "max"
-        return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg, direction=direction)
+        series = angles_df[col_name]
+
+        # Layer 1: hard angle-range clip — exclude physically impossible values
+        clip_cfg = cfg.get("clip_angle_range", {}) or {}
+        clip_min = clip_cfg.get("min", None)
+        clip_max = clip_cfg.get("max", None)
+        if clip_min is not None or clip_max is not None:
+            clip_mask = pd.Series(True, index=valid_mask.index)
+            if clip_min is not None:
+                clip_mask &= series >= float(clip_min)
+            if clip_max is not None:
+                clip_mask &= series <= float(clip_max)
+            valid_mask = valid_mask & clip_mask
+
+        # Layer 1.5: rolling-std noise filter — strip high-variability prep/artifact frames
+        nf_cfg = cfg.get("noise_filter", {}) or {}
+        if bool(nf_cfg.get("enabled", False)):
+            valid_mask = trim_valid_mask_by_rolling_std(
+                series=series,
+                valid_mask=valid_mask,
+                cfg=nf_cfg,
+            )
+
+        # Layer 2: movement-window pre-filter — restrict to the active movement
+        mw_cfg = cfg.get("movement_window", {}) or {}
+        if bool(mw_cfg.get("enabled", False)):
+            valid_mask = trim_valid_mask_to_movement_window(
+                series=series,
+                valid_mask=valid_mask,
+                cfg=mw_cfg,
+                smoothing_cfg=smooth_cfg,
+                direction=direction,
+            )
+
+        return estimate_robust_max(angle_deg=series, valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg, direction=direction)
 
     # Compute estimates based on pose type
     if is_bilateral:
@@ -494,9 +528,9 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 b_name = "pelvis_center"
                 c_name = "right_ankle"
             elif "hip_extension" in mb or "hip_extension" in pose_name:
-                a_name = "shoulder_midpoint"
-                b_name = f"{side}_hip"
-                c_name = f"{side}_knee"
+                a_name = "left_knee"
+                b_name = "pelvis_center"
+                c_name = "right_knee"
             elif "shoulder_flexion" in mb or ("shoulder" in mb and "stick" not in mb):
                 a_name = "hip_midpoint"
                 b_name = f"{side}_shoulder"
@@ -541,8 +575,21 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
 
 
 def main(argv: list[str] | None = None) -> int:
+    import copy
+
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     cfg = load_config(args.config)
+
+    # Apply pose-specific config overrides (from pose_overrides section in YAML).
+    # Top-level dict keys are deep-merged; scalar values are replaced.
+    pose_overrides = cfg.get("pose_overrides", {}) or {}
+    if args.pose in pose_overrides:
+        cfg = copy.deepcopy(cfg)
+        for key, val in (pose_overrides[args.pose] or {}).items():
+            if isinstance(val, dict) and isinstance(cfg.get(key), dict):
+                cfg[key] = {**cfg[key], **val}
+            else:
+                cfg[key] = val
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
