@@ -29,6 +29,7 @@ from mi4l.pose.mediapipe_pose import extract_mediapipe_pose_landmarks
 from mi4l.qc.qc_rules import (
     apply_derivative_qc,
     compute_knee_visibility_qc,
+    compute_upper_body_visibility_qc,
     compute_subject_size_qc,
     compute_video_level_qc_flags,
 )
@@ -78,10 +79,15 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     angles_df = metric_fn(landmarks_df)
 
     # 3) Basic QC masks
-    vis_qc = compute_knee_visibility_qc(
-        landmarks_df,
-        visibility_threshold=float(cfg.get("qc", {}).get("landmark_visibility_threshold", 0.5)),
-    )
+    # Shoulder-based poses are filmed from the waist up; lower-body landmarks are
+    # off-screen and would zero out the valid mask.  Use shoulder+wrist visibility
+    # for those poses instead.
+    _upper_body_poses = {"shoulder_stick_pass_through", "shoulder_flexion"}
+    vis_threshold = float(cfg.get("qc", {}).get("landmark_visibility_threshold", 0.5))
+    if pose_name in _upper_body_poses:
+        vis_qc = compute_upper_body_visibility_qc(landmarks_df, visibility_threshold=vis_threshold)
+    else:
+        vis_qc = compute_knee_visibility_qc(landmarks_df, visibility_threshold=vis_threshold)
     size_qc = compute_subject_size_qc(
         landmarks_df,
         min_bbox_height_px=int(cfg.get("qc", {}).get("min_bbox_height_px", 0)),

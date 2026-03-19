@@ -15,7 +15,7 @@ angles:
 qc:
   landmark_visibility_threshold: 0.5
   min_valid_ratio: 0.2
-  min_valid_frames: 15
+  min_valid_frames: 10
 
   min_bbox_height_px: 100
   require_subject_size: false   # size is a video-level warning; does NOT exclude frames
@@ -39,10 +39,10 @@ robust_max:
   method: topk_median
   topk_percent: 0.10
   min_topk_frames: 5
-  min_hold_frames: 15
+  min_hold_frames: 10
 
 peak_detection:
-  hold_frames: 15          # for reference – keep in sync with robust_max.min_hold_frames
+  hold_frames: 10          # for reference – keep in sync with robust_max.min_hold_frames
   top_k: 5                 # for reference – keep in sync with robust_max.min_topk_frames
 
   fallback_enabled: true   # activate movement-window fallback when primary held-peak fails
@@ -68,7 +68,7 @@ stable_plateau:
   stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
   stability_threshold: 0.15     # max rolling std to be considered "stable"
   min_value_threshold: 1.2      # direction=max: only frames above this are candidates
-  max_value_threshold: 0.9      # direction=min: only frames below this are candidates (shoulder/wrist during exercise ~0.3; rest ~1.5)
+  max_value_threshold: 1.5      # direction=min: only frames below this are candidates; 1.5 accepts grips up to 1.5× shoulder width
   min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:

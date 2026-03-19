@@ -35,6 +35,40 @@ def compute_knee_visibility_qc(landmarks_df: pd.DataFrame, visibility_threshold:
     )
 
 
+def compute_upper_body_visibility_qc(landmarks_df: pd.DataFrame, visibility_threshold: float) -> pd.DataFrame:
+    """
+    Visibility QC for upper-body poses (shoulder flexion, stick pass-through).
+
+    Uses shoulder + wrist landmarks instead of hip/knee/ankle so that videos
+    filmed from the waist up (where lower-body landmarks are off-screen) still
+    produce a valid mask.
+    """
+    def _vis(name: str) -> pd.Series:
+        col = f"{name}_visibility"
+        if col not in landmarks_df.columns:
+            return pd.Series(np.nan, index=landmarks_df.index)
+        return landmarks_df[col].astype(float)
+
+    pose_detected = landmarks_df.get("pose_detected")
+    if pose_detected is None:
+        pose_detected = pd.Series(True, index=landmarks_df.index)
+
+    lmin = pd.concat([_vis("left_shoulder"), _vis("left_wrist")], axis=1).min(axis=1, skipna=False)
+    rmin = pd.concat([_vis("right_shoulder"), _vis("right_wrist")], axis=1).min(axis=1, skipna=False)
+
+    left_valid = pose_detected.fillna(False) & (lmin >= float(visibility_threshold))
+    right_valid = pose_detected.fillna(False) & (rmin >= float(visibility_threshold))
+
+    return pd.DataFrame(
+        {
+            "left_knee_vis_min": lmin.astype(float),
+            "right_knee_vis_min": rmin.astype(float),
+            "left_knee_valid": left_valid.astype(bool),
+            "right_knee_valid": right_valid.astype(bool),
+        }
+    )
+
+
 def compute_subject_size_qc(
     landmarks_df: pd.DataFrame,
     min_bbox_height_px: int,

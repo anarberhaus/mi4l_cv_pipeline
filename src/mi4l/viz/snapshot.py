@@ -512,9 +512,20 @@ def save_snapshot(
     frame_idx = int(landmarks_row.get("frame_idx", 0))
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ok, frame = cap.read()
-    cap.release()
     if not ok or frame is None:
-        raise RuntimeError(f"Could not read frame {frame_idx} from {video_path}")
+        # Requested frame is beyond the video length — seek to the last readable frame.
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fallback_idx = max(0, min(frame_idx, total - 1))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, fallback_idx)
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            print(f"  [WARN] snapshot: frame {frame_idx} out of range "
+                  f"(total={total}), using frame {fallback_idx} instead.")
+        else:
+            cap.release()
+            print(f"  [WARN] snapshot: could not read any frame from {video_path} — skipping snapshot.")
+            return
+    cap.release()
 
     fh, fw = frame.shape[:2]
     w = int(landmarks_row.get("image_w", fw))

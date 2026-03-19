@@ -393,6 +393,32 @@ def estimate_robust_max(
                 )
                 if fb is not None:
                     return fb
+
+            # ----------------------------------------------------------------
+            # Last resort: top-20% of ALL valid frames, no movement window
+            # required.  Confidence=0.25 signals this is the weakest path.
+            # ----------------------------------------------------------------
+            ok_lr = vm & np.isfinite(values)
+            if ok_lr.sum() > 0:
+                top_pct = float(peak_cfg.get("fallback_top_percent", 0.20)) if peak_cfg else 0.20
+                lr_vals = values[ok_lr]
+                k_lr = max(1, int(np.ceil(top_pct * lr_vals.size)))
+                k_lr = min(k_lr, lr_vals.size)
+                if direction == "min":
+                    top_lr = np.sort(lr_vals)[:k_lr]
+                else:
+                    top_lr = np.sort(lr_vals)[-k_lr:]
+                est_lr = float(np.nanmedian(top_lr))
+                if np.isfinite(est_lr):
+                    return RobustMaxResult(
+                        value_deg=est_lr,
+                        confidence=0.25,
+                        n_total=n_total,
+                        n_valid=int(ok_lr.sum()),
+                        n_used=k_lr,
+                        flags=flags + ["no_valid_hold", "last_resort_fallback"],
+                    )
+
             return RobustMaxResult(
                 value_deg=None,
                 confidence=0.0,
