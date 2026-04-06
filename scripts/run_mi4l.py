@@ -22,13 +22,14 @@ from mi4l.io.export import (
     save_landmarks_csv,
     save_summary_csv,
 )
-from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau, smooth_angle_series
+from mi4l.metrics.arom_prom import estimate_robust_max, estimate_stable_plateau, smooth_angle_series, trim_valid_mask_by_rolling_std, trim_valid_mask_to_movement_window
 from mi4l.metrics.mi4l import compute_mi4l
 from mi4l.metrics.summary_metrics import compute_extended_summary
 from mi4l.pose.mediapipe_pose import extract_mediapipe_pose_landmarks
 from mi4l.qc.qc_rules import (
     apply_derivative_qc,
     compute_knee_visibility_qc,
+    compute_upper_body_visibility_qc,
     compute_subject_size_qc,
     compute_video_level_qc_flags,
 )
@@ -78,10 +79,15 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
     angles_df = metric_fn(landmarks_df)
 
     # 3) Basic QC masks
-    vis_qc = compute_knee_visibility_qc(
-        landmarks_df,
-        visibility_threshold=float(cfg.get("qc", {}).get("landmark_visibility_threshold", 0.5)),
-    )
+    # Shoulder-based poses are filmed from the waist up; lower-body landmarks are
+    # off-screen and would zero out the valid mask.  Use shoulder+wrist visibility
+    # for those poses instead.
+    _upper_body_poses = {"shoulder_stick_pass_through", "shoulder_flexion"}
+    vis_threshold = float(cfg.get("qc", {}).get("landmark_visibility_threshold", 0.5))
+    if pose_name in _upper_body_poses:
+        vis_qc = compute_upper_body_visibility_qc(landmarks_df, visibility_threshold=vis_threshold)
+    else:
+        vis_qc = compute_knee_visibility_qc(landmarks_df, visibility_threshold=vis_threshold)
     size_qc = compute_subject_size_qc(
         landmarks_df,
         min_bbox_height_px=int(cfg.get("qc", {}).get("min_bbox_height_px", 0)),
@@ -181,19 +187,57 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
         if valid_mask is None:
             base = col_name.rsplit("_", 2)[0]
             valid_mask = angles_df.get(f"{base}_valid") if f"{base}_valid" in angles_df.columns else pd.Series(True, index=angles_df.index)
+
         # Distance metrics (e.g. stick pass-through) use stable plateau detection
         if col_name.endswith("_dist_norm"):
             plateau_cfg = cfg.get("stable_plateau", {}) or {}
+            plateau_direction = "min" if pose_name == "shoulder_stick_pass_through" else "max"
             return estimate_stable_plateau(
                 series=angles_df[col_name],
                 valid_mask=valid_mask,
                 smoothing_cfg=smooth_cfg,
                 plateau_cfg=plateau_cfg,
                 qc_cfg=qc_cfg,
+                direction=plateau_direction,
             )
-        # Angle metrics use topk robust max/min
+
+        # --- Pre-filters for angle metrics ---
         direction = "max"
-        return estimate_robust_max(angle_deg=angles_df[col_name], valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg, direction=direction)
+        series = angles_df[col_name]
+
+        # Layer 1: hard angle-range clip — exclude physically impossible values
+        clip_cfg = cfg.get("clip_angle_range", {}) or {}
+        clip_min = clip_cfg.get("min", None)
+        clip_max = clip_cfg.get("max", None)
+        if clip_min is not None or clip_max is not None:
+            clip_mask = pd.Series(True, index=valid_mask.index)
+            if clip_min is not None:
+                clip_mask &= series >= float(clip_min)
+            if clip_max is not None:
+                clip_mask &= series <= float(clip_max)
+            valid_mask = valid_mask & clip_mask
+
+        # Layer 1.5: rolling-std noise filter — strip high-variability prep/artifact frames
+        nf_cfg = cfg.get("noise_filter", {}) or {}
+        if bool(nf_cfg.get("enabled", False)):
+            valid_mask = trim_valid_mask_by_rolling_std(
+                series=series,
+                valid_mask=valid_mask,
+                cfg=nf_cfg,
+            )
+
+        # Layer 2: movement-window pre-filter — restrict to the active movement
+        mw_cfg = cfg.get("movement_window", {}) or {}
+        if bool(mw_cfg.get("enabled", False)):
+            valid_mask = trim_valid_mask_to_movement_window(
+                series=series,
+                valid_mask=valid_mask,
+                cfg=mw_cfg,
+                smoothing_cfg=smooth_cfg,
+                direction=direction,
+            )
+
+        return estimate_robust_max(angle_deg=series, valid_mask=valid_mask, smoothing_cfg=smooth_cfg, robust_cfg=robust_cfg, qc_cfg=qc_cfg, direction=direction)
 
     # Compute estimates based on pose type
     if is_bilateral:
@@ -490,9 +534,9 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
                 b_name = "pelvis_center"
                 c_name = "right_ankle"
             elif "hip_extension" in mb or "hip_extension" in pose_name:
-                a_name = "shoulder_midpoint"
-                b_name = f"{side}_hip"
-                c_name = f"{side}_knee"
+                a_name = "left_knee"
+                b_name = "pelvis_center"
+                c_name = "right_knee"
             elif "shoulder_flexion" in mb or ("shoulder" in mb and "stick" not in mb):
                 a_name = "hip_midpoint"
                 b_name = f"{side}_shoulder"
@@ -537,8 +581,21 @@ def _process_one_video(kind: str, video_path: Path, out_dir: Path, cfg: dict, ac
 
 
 def main(argv: list[str] | None = None) -> int:
+    import copy
+
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     cfg = load_config(args.config)
+
+    # Apply pose-specific config overrides (from pose_overrides section in YAML).
+    # Top-level dict keys are deep-merged; scalar values are replaced.
+    pose_overrides = cfg.get("pose_overrides", {}) or {}
+    if args.pose in pose_overrides:
+        cfg = copy.deepcopy(cfg)
+        for key, val in (pose_overrides[args.pose] or {}).items():
+            if isinstance(val, dict) and isinstance(cfg.get(key), dict):
+                cfg[key] = {**cfg[key], **val}
+            else:
+                cfg[key] = val
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -635,7 +692,29 @@ def main(argv: list[str] | None = None) -> int:
             )
             # side already in row; avoid overwriting
             ext.pop("side", None)
-            row.update(ext)
+
+            if args.pose == "shoulder_stick_pass_through":
+                # This pose reports a grip-width ratio, not AROM/PROM degrees.
+                # Build a purpose-specific row: drop irrelevant AROM/PROM/MI4L columns
+                # and expose the metric under clear, self-describing names.
+                stored_val = arom_est.value_deg  # shoulder/wrist (0.30 → higher = better)
+                grip_multiple = (1.0 / stored_val) if stored_val and stored_val > 0 else None
+                row = {
+                    "movement_name": ext.get("movement_name"),
+                    "joint_name": ext.get("joint_name"),
+                    "angle_type": ext.get("angle_type"),
+                    "side": "both",
+                    "grip_width_shoulder_widths": grip_multiple,   # e.g. 3.30 — intuitive display value
+                    "grip_ratio_normalized": stored_val,           # e.g. 0.30 — 1.0 = shoulder-width grip (best)
+                    "confidence": arom_est.confidence,
+                    "qc_flags": row["qc_flags"],
+                    "plateau_duration_s": ext.get("peak_hold_time_s"),
+                    "frames_valid_pct": ext.get("frames_valid_pct"),
+                    "avg_landmark_visibility": ext.get("avg_landmark_visibility"),
+                }
+            else:
+                row.update(ext)
+
             rows.append(row)
     else:
         # Sided pose: iterate over active sides
@@ -711,7 +790,9 @@ def main(argv: list[str] | None = None) -> int:
     _COLUMN_ORDER = [
         # Metadata (front)
         "movement_name", "joint_name", "angle_type", "side",
-        # Core ROM metrics
+        # Stick pass-through specific (only present for shoulder_stick_pass_through)
+        "grip_width_shoulder_widths", "grip_ratio_normalized", "confidence", "plateau_duration_s",
+        # Core ROM metrics (standard poses)
         "arom_deg", "prom_deg", "mi4l",
         "arom_confidence", "prom_confidence", "mi4l_valid", "qc_flags",
         # Derived
@@ -735,13 +816,19 @@ def main(argv: list[str] | None = None) -> int:
     # Console summary (short)
     for _, r in summary_df.iterrows():
         name = str(r.get("movement_name", ""))
-        side = str(r["side"]).upper()
-        arom = r["arom_deg"]
-        prom = r["prom_deg"]
-        mi4l = r["mi4l"]
-        valid = bool(r["mi4l_valid"])
-        flags = str(r["qc_flags"])
-        print(f"[{name} | {side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
+        side = str(r.get("side", "")).upper()
+        flags = str(r.get("qc_flags", ""))
+        if args.pose == "shoulder_stick_pass_through":
+            grip = r.get("grip_width_shoulder_widths")
+            norm = r.get("grip_ratio_normalized")
+            conf = r.get("confidence")
+            print(f"[{name} | {side}] Grip={grip!s}x shoulder | Normalized={norm!s} | Confidence={conf!s} | flags={flags}")
+        else:
+            arom = r.get("arom_deg")
+            prom = r.get("prom_deg")
+            mi4l = r.get("mi4l")
+            valid = bool(r.get("mi4l_valid", False))
+            print(f"[{name} | {side}] AROM={arom!s} deg | PROM={prom!s} deg | MI4L={mi4l!s} | valid={valid} | flags={flags}")
 
     return 0
 

@@ -109,6 +109,18 @@ def compute_knee_flexion_angles(landmarks_df: pd.DataFrame) -> pd.DataFrame:
     left_deg = angle_orientation_deg(lv_x, lv_y, ref_axis="horizontal")
     right_deg = angle_orientation_deg(rv_x, rv_y, ref_axis="horizontal")
 
+    # Fold angles > 90° into the [0, 90] range.
+    # angle_orientation_deg returns values in [0, 180]. When the ankle-to-knee
+    # vector points backward (leg flat behind the participant), the angle lands
+    # near 180° instead of near 0°, which is an artifact of the filming
+    # orientation.  Folding at 90° maps both orientations to the same range:
+    #   0° = ankle at knee height (flat leg)  →  90° = ankle directly above knee
+    # Good-case series: 0°→72° (increasing), resting 0° → peak 72°
+    # Bad-case series before fold: 178°→108° (decreasing), after fold: 2°→72°
+    # In both cases direction="max" now correctly finds the peak (~72°).
+    left_deg = np.minimum(left_deg, 180.0 - left_deg)
+    right_deg = np.minimum(right_deg, 180.0 - right_deg)
+
     out = pd.DataFrame(
         {
             "frame_idx": landmarks_df["frame_idx"].to_numpy(dtype=int),
@@ -425,9 +437,9 @@ def compute_stick_pass_through_metrics(landmarks_df: pd.DataFrame) -> pd.DataFra
     shoulder_dist = np.linalg.norm(l_s - r_s, axis=1)
     
     with np.errstate(invalid="ignore", divide="ignore"):
-        norm_dist = wrist_dist / shoulder_dist
-        
-    invalid = (shoulder_dist <= 0) | np.isnan(shoulder_dist)
+        norm_dist = shoulder_dist / wrist_dist
+
+    invalid = (wrist_dist <= 0) | np.isnan(wrist_dist) | (shoulder_dist <= 0) | np.isnan(shoulder_dist)
     norm_dist[invalid] = np.nan
 
     out = pd.DataFrame(

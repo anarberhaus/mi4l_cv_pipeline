@@ -39,4 +39,11 @@ def compute_mi4l(
     if not np.isfinite(mi4l):
         return Mi4LResult(value=None, valid=False, flags=flags + ["mi4l_nonfinite"])
 
+    # PROM was within the prom_lt_arom_tolerance window but just below AROM,
+    # producing a tiny negative value that is purely measurement noise at the
+    # range ceiling.  Clamp to 0 (no meaningful mobility deficit) and flag it.
+    if mi4l < 0.0:
+        flags.append("mi4l_clamped_to_zero")
+        mi4l = 0.0
+
     return Mi4LResult(value=float(mi4l), valid=True, flags=flags)

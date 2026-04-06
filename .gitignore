@@ -3,7 +3,8 @@ data/
 results/
 results_testing/
 xx/
-
+analysis/
+assets/
 
 # scratch / docs
 scratch/
@@ -13,6 +14,7 @@ docs/
 poses.pdf
 context.md
 dim_images.py
+ANALYSIS_PROMPTS.md
 
 # video files
 *.mp4

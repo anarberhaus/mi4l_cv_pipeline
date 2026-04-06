@@ -15,7 +15,7 @@ angles:
 qc:
   landmark_visibility_threshold: 0.5
   min_valid_ratio: 0.2
-  min_valid_frames: 15
+  min_valid_frames: 10
 
   min_bbox_height_px: 100
   require_subject_size: false   # size is a video-level warning; does NOT exclude frames
@@ -39,10 +39,10 @@ robust_max:
   method: topk_median
   topk_percent: 0.10
   min_topk_frames: 5
-  min_hold_frames: 15
+  min_hold_frames: 10
 
 peak_detection:
-  hold_frames: 15          # for reference – keep in sync with robust_max.min_hold_frames
+  hold_frames: 10          # for reference – keep in sync with robust_max.min_hold_frames
   top_k: 5                 # for reference – keep in sync with robust_max.min_topk_frames
 
   fallback_enabled: true   # activate movement-window fallback when primary held-peak fails
@@ -50,10 +50,25 @@ peak_detection:
   movement_buffer_frames: 5    # frames to trim inward from detected window edges
   fallback_top_percent: 0.20   # top fraction of window values used for the fallback estimate
 
+clip_angle_range:
+  min: null   # exclude frames below this value (null = disabled)
+  max: null   # exclude frames above this value (null = disabled)
+
+noise_filter:
+  enabled: true
+  rolling_window_frames: 15   # ~0.5 s at 30 fps — window for rolling std computation
+  max_rolling_std: 20.0       # deg — frames with higher local variability are excluded
+
+movement_window:
+  enabled: true
+  slope_threshold: 2.0      # deg/frame – minimum |derivative| to count as active movement
+  buffer_frames: 5          # frames to trim inward from detected window edges
+
 stable_plateau:
   stability_window_frames: 30   # rolling std window size in frames (~1s at 30fps)
   stability_threshold: 0.15     # max rolling std to be considered "stable"
-  min_value_threshold: 1.2      # minimum normalized value (e.g. 1.2x shoulder width)
+  min_value_threshold: 1.2      # direction=max: only frames above this are candidates
+  max_value_threshold: 1.5      # direction=min: only frames below this are candidates; 1.5 accepts grips up to 1.5× shoulder width
   min_plateau_frames: 10        # minimum frames for a valid plateau
 
 mi4l:
@@ -72,3 +87,11 @@ export:
   plots:
     enabled: true
     dpi: 150
+
+pose_overrides:
+  kneeling_knee_flexion:
+    # After fold-at-90 normalization the angle is already in [0, 90].
+    # This clip is a secondary safety net: discard any residual artifact frames
+    # where the angle is above the physiological maximum for this movement.
+    clip_angle_range:
+      max: 90

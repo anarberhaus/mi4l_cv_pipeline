@@ -68,6 +68,116 @@ def smooth_angle_series(angle_deg: pd.Series, smoothing_cfg: dict[str, Any]) -> 
     raise ValueError(f"Unknown smoothing method: {method}")
 
 
+def trim_valid_mask_to_movement_window(
+    series: pd.Series,
+    valid_mask: pd.Series,
+    cfg: "dict[str, Any]",
+    smoothing_cfg: "dict[str, Any]",
+    direction: str = "max",
+) -> pd.Series:
+    """
+    Pre-filter: restrict valid_mask to the window of active movement by
+    detecting onset and end via the derivative of the smoothed angle series.
+
+    Algorithm
+    ---------
+    1. Smooth the series.
+    2. Compute frame-to-frame derivative; smooth it with a rolling window.
+    3. Find the candidate peak = argmax (direction="max") or argmin
+       (direction="min") of the smoothed valid values.
+    4. Scan BACKWARD from the peak: find the last frame whose |derivative|
+       exceeds slope_threshold → that is the movement onset.
+    5. Scan FORWARD from the peak: find the first frame after the peak whose
+       |derivative| exceeds slope_threshold (the return phase) → movement end.
+    6. Apply buffer_frames inward on both sides.
+    7. Return a copy of valid_mask with False outside [onset, end].
+
+    If onset/end cannot be determined the original valid_mask is returned
+    unchanged (conservative fallback – no frames are incorrectly removed).
+    """
+    slope_threshold: float = float(cfg.get("slope_threshold", 2.0))
+    buffer: int = int(cfg.get("buffer_frames", 5))
+
+    smoothed = smooth_angle_series(series, smoothing_cfg=smoothing_cfg)
+    vm = valid_mask.fillna(False).to_numpy(dtype=bool)
+    values = smoothed.to_numpy(dtype=float)
+    n = len(values)
+
+    if n < 3:
+        return valid_mask
+
+    ok = vm & np.isfinite(values)
+    if ok.sum() == 0:
+        return valid_mask
+
+    # Derivative + light smoothing
+    deriv = np.zeros(n, dtype=float)
+    deriv[:-1] = np.diff(values)
+    deriv[~ok] = 0.0
+    deriv_s = pd.Series(deriv).rolling(window=3, center=True, min_periods=1).mean().to_numpy()
+
+    # Peak frame
+    valid_vals = np.where(ok, values, np.nan)
+    if direction == "min":
+        peak_idx = int(np.nanargmin(valid_vals))
+    else:
+        peak_idx = int(np.nanargmax(valid_vals))
+
+    # Onset: last frame BEFORE peak where |deriv| >= slope_threshold
+    pre_peak = np.abs(deriv_s[:peak_idx])
+    strong_pre = np.where(pre_peak >= slope_threshold)[0]
+    onset = int(strong_pre[0]) if strong_pre.size > 0 else 0
+
+    # End: first frame AFTER peak where |deriv| >= slope_threshold (return phase)
+    post_peak = np.abs(deriv_s[peak_idx:])
+    strong_post = np.where(post_peak >= slope_threshold)[0]
+    # Skip the peak frame itself (index 0 in the slice)
+    valid_post = strong_post[strong_post > 0]
+    end = (peak_idx + int(valid_post[0])) if valid_post.size > 0 else (n - 1)
+
+    # Apply inward buffer
+    onset = min(onset + buffer, peak_idx)
+    end = max(end - buffer, peak_idx)
+
+    if end <= onset:
+        return valid_mask
+
+    new_mask_arr = valid_mask.to_numpy(dtype=bool).copy()
+    new_mask_arr[:onset] = False
+    new_mask_arr[end + 1:] = False
+    return pd.Series(new_mask_arr, index=valid_mask.index)
+
+
+def trim_valid_mask_by_rolling_std(
+    series: pd.Series,
+    valid_mask: pd.Series,
+    cfg: "dict[str, Any]",
+) -> pd.Series:
+    """
+    Pre-filter: exclude frames where the local angle variability is too high.
+
+    A rolling standard deviation is computed over the raw angle series.
+    Any frame whose rolling_std exceeds max_rolling_std is masked out.
+    This removes artifact / prep-phase frames (e.g. wild spikes before
+    the participant settles into position) so that downstream peak
+    detection anchors to the actual smooth movement.
+
+    Typical calibration (30 fps):
+      - Noisy prep / artifact region: rolling std >> 20 deg  -> excluded
+      - Smooth movement plateau:       rolling std <  10 deg  -> kept
+    """
+    window: int = int(cfg.get("rolling_window_frames", 15))
+    max_std: float = float(cfg.get("max_rolling_std", 20.0))
+
+    rolling_std = (
+        series.rolling(window=window, center=True, min_periods=1)
+        .std()
+        .fillna(float("inf"))
+    )
+    stable_mask = rolling_std <= max_std
+    return valid_mask & stable_mask
+
+
 def estimate_movement_window_fallback(
     values: np.ndarray,
     ok: np.ndarray,
@@ -283,6 +393,32 @@ def estimate_robust_max(
                 )
                 if fb is not None:
                     return fb
+
+            # ----------------------------------------------------------------
+            # Last resort: top-20% of ALL valid frames, no movement window
+            # required.  Confidence=0.25 signals this is the weakest path.
+            # ----------------------------------------------------------------
+            ok_lr = vm & np.isfinite(values)
+            if ok_lr.sum() > 0:
+                top_pct = float(peak_cfg.get("fallback_top_percent", 0.20)) if peak_cfg else 0.20
+                lr_vals = values[ok_lr]
+                k_lr = max(1, int(np.ceil(top_pct * lr_vals.size)))
+                k_lr = min(k_lr, lr_vals.size)
+                if direction == "min":
+                    top_lr = np.sort(lr_vals)[:k_lr]
+                else:
+                    top_lr = np.sort(lr_vals)[-k_lr:]
+                est_lr = float(np.nanmedian(top_lr))
+                if np.isfinite(est_lr):
+                    return RobustMaxResult(
+                        value_deg=est_lr,
+                        confidence=0.25,
+                        n_total=n_total,
+                        n_valid=int(ok_lr.sum()),
+                        n_used=k_lr,
+                        flags=flags + ["no_valid_hold", "last_resort_fallback"],
+                    )
+
             return RobustMaxResult(
                 value_deg=None,
                 confidence=0.0,
@@ -348,18 +484,25 @@ def estimate_stable_plateau(
     smoothing_cfg: dict[str, Any],
     plateau_cfg: dict[str, Any],
     qc_cfg: dict[str, Any],
+    direction: str = "max",
 ) -> RobustMaxResult:
     """
-    Find the most stable plateau in `series` that is also above a minimum value
-    threshold. Intended for metrics like stick pass-through where the key value
-    is a stable holding period (e.g. the starting grip width), not the global
-    max or min.
+    Find the most stable plateau in `series` within a value range determined by
+    `direction`.
+
+    direction="max" (default): looks for plateaus above `min_value_threshold`.
+        Used when the metric is highest during the active movement (e.g. old
+        wrist/shoulder ratio).
+    direction="min": looks for plateaus below `max_value_threshold`. Used when
+        the metric is lowest during the active movement (e.g. shoulder/wrist
+        ratio, where a narrower grip = higher score but the exercise period
+        produces the lowest values).
 
     Algorithm:
       1. Smooth the series.
-      2. Compute a rolling std over `stability_window_sec` seconds.
+      2. Compute a rolling std over `stability_window_frames` frames.
       3. Mark frames as "stable" where rolling_std < stability_threshold AND
-         value > min_value_threshold AND valid_mask is True.
+         value is within the direction-appropriate range AND valid_mask is True.
       4. Find the longest contiguous run of stable frames.
       5. Return the median of that run as the estimate.
     """
@@ -370,10 +513,15 @@ def estimate_stable_plateau(
         return RobustMaxResult(value_deg=None, confidence=0.0, n_total=0, n_valid=0, n_used=0, flags=["empty_series"])
 
     # --- Config ---
-    stability_window_sec: float = float(plateau_cfg.get("stability_window_sec", 2.0))
     stability_threshold: float = float(plateau_cfg.get("stability_threshold", 0.15))
-    min_value_threshold: float = float(plateau_cfg.get("min_value_threshold", 1.2))
     min_plateau_frames: int = int(plateau_cfg.get("min_plateau_frames", 10))
+
+    if direction == "min":
+        max_value_threshold: float = float(plateau_cfg.get("max_value_threshold", 0.9))
+        value_filter_label = f"no_values_below_threshold:{max_value_threshold}"
+    else:
+        min_value_threshold: float = float(plateau_cfg.get("min_value_threshold", 1.2))
+        value_filter_label = f"no_values_above_threshold:{min_value_threshold}"
 
     # --- 1. Smooth ---
     smoothed = smooth_angle_series(series, smoothing_cfg=smoothing_cfg)
@@ -390,10 +538,6 @@ def estimate_stable_plateau(
         return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + ["no_valid_values"])
 
     # --- 2. Rolling std ---
-    # Estimate fps from time column if available, else assume 30fps
-    # We work in frame-space: convert stability_window_sec to frames
-    # Use a simple heuristic: window = max(3, stability_window_sec * estimated_fps)
-    # We can't know fps here, so we use a frame count directly from config
     stability_window_frames: int = int(plateau_cfg.get("stability_window_frames", 30))
 
     smoothed_series = pd.Series(values)
@@ -404,12 +548,17 @@ def estimate_stable_plateau(
     ).std().to_numpy(dtype=float)
 
     # --- 3. Stability + threshold mask ---
+    if direction == "min":
+        value_ok = values < max_value_threshold
+    else:
+        value_ok = values > min_value_threshold
+
     stable = (
         vm
         & np.isfinite(values)
         & np.isfinite(rolling_std)
         & (rolling_std < stability_threshold)
-        & (values > min_value_threshold)
+        & value_ok
     )
 
     # --- 4. Find longest contiguous run ---
@@ -421,16 +570,15 @@ def estimate_stable_plateau(
 
     if len(starts) == 0:
         flags.append("no_stable_plateau_found")
-        # Fallback: use all valid frames above threshold
-        fallback_ok = vm & np.isfinite(values) & (values > min_value_threshold)
+        fallback_ok = vm & np.isfinite(values) & value_ok
         if fallback_ok.sum() == 0:
-            return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + ["no_values_above_threshold"])
+            return RobustMaxResult(value_deg=None, confidence=0.0, n_total=n_total, n_valid=n_valid, n_used=0, flags=flags + [value_filter_label])
         fallback_vals = values[fallback_ok]
         est = float(np.nanmedian(fallback_vals))
         fallback_idx = np.nonzero(fallback_ok)[0]
         idx_labels = series.index.to_numpy()
         frames_used = [int(idx_labels[i]) for i in fallback_idx]
-        confidence = 0.3  # low confidence for fallback
+        confidence = 0.3
         return RobustMaxResult(value_deg=est, confidence=confidence, n_total=n_total, n_valid=n_valid, n_used=len(fallback_idx), flags=flags, frames_used=frames_used)
 
     # Pick the longest run
