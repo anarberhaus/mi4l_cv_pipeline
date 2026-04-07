@@ -5,6 +5,7 @@ results_testing/
 xx/
 # Thesis / aggregate analysis: keep scripts; ignore generated CSVs and plots (may contain participant fields)
 analysis/outputs/
+analysis/*.zip
 assets/
 
 # scratch / docs
