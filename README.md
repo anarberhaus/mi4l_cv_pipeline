@@ -11,10 +11,12 @@ Computer-vision pipeline that estimates joint angles from RGB video and computes
 3. [Quick start](#quick-start)
 4. [Running a single pose](#running-a-single-pose)
 5. [Running all poses at once](#running-all-poses-at-once)
-6. [Supported poses](#supported-poses)
-7. [Outputs](#outputs)
-8. [Configuration](#configuration-configsdefaultyaml)
-9. [How it works](#how-it-works)
+6. [Aggregate analysis (thesis figures)](#aggregate-analysis-thesis-figures)
+7. [Supported poses](#supported-poses)
+8. [Outputs](#outputs)
+9. [Configuration](#configuration-configsdefaultyaml)
+10. [Tests](#tests)
+11. [How it works](#how-it-works)
 
 ---
 
@@ -33,7 +35,13 @@ mi4l_cv_pipeline/
 │   └── viz/          # Plots and snapshot export
 ├── scripts/
 │   ├── run_mi4l.py   # Main CLI: run ONE pose
-│   └── run_all.py    # Convenience script: run ALL poses
+│   ├── run_all.py    # Convenience script: run ALL poses
+│   ├── batch_process.py   # Batch folder processing (optional)
+│   └── audit_results.py   # Inspect / audit result folders (optional)
+├── analysis/
+│   ├── pipeline_performance.py  # Aggregate metrics + plots from results/ (run second)
+│   ├── movement_analysis.py     # Movement / time-series figures (run after pipeline_performance)
+│   └── outputs/                   # Generated CSVs and plots (gitignored by default)
 ├── configs/
 │   └── default.yaml  # Default config (thresholds, params)
 ├── data/             # Your video files (gitignored)
@@ -60,6 +68,8 @@ You need a Supabase project to use the Streamlit interface. Create a `.env` file
 SUPABASE_URL="your-project-url"
 SUPABASE_KEY="your-anon-key"
 ```
+
+Keep `.env` and any other secrets **out of version control** (they are listed in `.gitignore`). Local video folders (`data/`), pipeline outputs (`results/`), and generated analysis exports (`analysis/outputs/`) are also ignored by default so participant media and aggregated tables are not pushed to GitHub by mistake.
 
 ### Option A: Local Conda (Windows/Mac)
 
@@ -148,6 +158,27 @@ python scripts/run_all.py
 ```
 
 Results are saved to the folder specified by `--out` (or to `results/<pose>/` when using `run_all.py`). When using the GUI, results are automatically uploaded to your Supabase project.
+
+---
+
+## Aggregate analysis (thesis figures)
+
+After you have one or more **batch folders** under `results/` (each containing per-participant `summary.csv` trees), you can build combined tables and publication-style plots.
+
+**Prerequisites:** `results/` with pipeline outputs. The collectors skip the top-level folder `results/assessments/` and any path containing `assessments`.
+
+From the **repository root**:
+
+```bash
+conda activate mi4l   # or your venv
+python analysis/pipeline_performance.py
+python analysis/movement_analysis.py
+```
+
+- `pipeline_performance.py` writes aggregated CSVs and plots (e.g. success rate, MWI distribution, QC frames) under `analysis/outputs/`.
+- `movement_analysis.py` adds movement-focused summaries and additional plots (e.g. variability, hold duration, time-series profiles).
+
+Regenerate these whenever you add or change batches under `results/`.
 
 ---
 
@@ -332,6 +363,16 @@ All output files are written to the folder specified by `--out`:
 | `mi4l` | `side` | `left` | Default side when `--side` is not passed via CLI |
 | `export` | `save_snapshots` | `true` | Save annotated best-frame images |
 | `export > plots` | `enabled` | `true` | Generate angle-over-time plots |
+
+---
+
+## Tests
+
+Unit tests live under `tests/`. With dependencies installed:
+
+```bash
+pytest tests/
+```
 
 ---
 
