@@ -162,7 +162,7 @@ if st.session_state.user and st.session_state.access_token and st.session_state.
     try:
         supabase.auth.set_session(st.session_state.access_token, st.session_state.refresh_token)
     except Exception as e:
-        print(f"DEBUG: Re-sync Error: {e}")
+        pass
 
 st.markdown("""
 <style>
@@ -936,11 +936,11 @@ def _render_processing():
             "created_at": pd.Timestamp.now().isoformat()
         }
         res = supabase.table("analyses").insert(analysis_data).execute()
-        print(f"DEBUG: Supabase Insert Result (Single): {res}")
+
         st.session_state.history_analysis_id = analysis_id
         st.session_state.history_analysis_data = analysis_data
     except Exception as e:
-        print(f"DEBUG: Supabase Insert Error (Single): {e}")
+
         st.warning(f"Failed to save to cloud history: {e}")
 
     _go("results")
@@ -1451,11 +1451,11 @@ def _render_full_processing():
             "created_at": pd.Timestamp.now().isoformat()
         }
         res = supabase.table("analyses").insert(analysis_data).execute()
-        print(f"DEBUG: Supabase Insert Result (Full): {res}")
+
         st.session_state.history_analysis_id = analysis_id
         st.session_state.history_analysis_data = analysis_data
     except Exception as e:
-        print(f"DEBUG: Supabase Insert Error (Full): {e}")
+
         st.warning(f"Failed to save to cloud history: {e}")
     
     with open(out_dir / "master_summary.json", "w") as f:

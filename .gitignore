@@ -3,7 +3,9 @@ data/
 results/
 results_testing/
 xx/
-analysis/
+# Thesis / aggregate analysis: keep scripts; ignore generated CSVs and plots (may contain participant fields)
+analysis/outputs/
+analysis/*.zip
 assets/
 
 # scratch / docs
@@ -24,19 +26,47 @@ ANALYSIS_PROMPTS.md
 # python junk
 __pycache__/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
+*.egg
+build/
+dist/
+
+# test / coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+
+# Jupyter
+.ipynb_checkpoints/
 
 # venv / env
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 
-# editor / OS
+# secrets / keys (never commit)
+*.pem
+id_rsa
+id_rsa.pub
+*.key
+
+# editor / OS / IDE
 .DS_Store
 Thumbs.db
+Desktop.ini
+.cursor/
+.idea/
+*.swp
+*.swo
 
 # logs
 *.log
