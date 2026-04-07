@@ -7,7 +7,7 @@ Computer-vision pipeline that estimates joint angles from RGB video and computes
 ## Table of contents
 
 1. [Project structure](#project-structure)
-2. [Setup](#setup-recommended-conda)
+2. [Setup](#setup)
 3. [Quick start](#quick-start)
 4. [Running a single pose](#running-a-single-pose)
 5. [Running all poses at once](#running-all-poses-at-once)
@@ -165,7 +165,7 @@ Results are saved to the folder specified by `--out` (or to `results/<pose>/` wh
 
 After you have one or more **batch folders** under `results/` (each containing per-participant `summary.csv` trees), you can build combined tables and publication-style plots.
 
-**Prerequisites:** `results/` with pipeline outputs. The collectors skip the top-level folder `results/assessments/` and any path containing `assessments`.
+**Prerequisites:** `results/` with pipeline outputs.
 
 From the **repository root**:
 
@@ -356,7 +356,7 @@ All output files are written to the folder specified by `--out`:
 | `pose` | `min_detection_confidence` | `0.5` | Minimum detection confidence |
 | `pose` | `frame_stride` | `1` | Process every N-th frame (increase to speed up at cost of resolution) |
 | `qc` | `landmark_visibility_threshold` | `0.5` | Min MediaPipe visibility score to treat a frame as valid |
-| `qc` | `min_bbox_height_px` | `150` | Minimum subject height in pixels (smaller = subject too far away) |
+| `qc` | `min_bbox_height_px` | `100` | Minimum subject height in pixels (smaller = subject too far away) |
 | `qc` | `derivative_deg_per_sec_max` | `600` | Max angle change rate: frames exceeding this are rejected |
 | `smoothing` | `method` | `median` | Smoothing method: `none`, `median`, or `savgol` |
 | `robust_max` | `topk_percent` | `0.10` | Fraction of frames used for the top-K peak estimate |
