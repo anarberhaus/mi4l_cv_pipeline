@@ -63,7 +63,7 @@ mi4l_cv_pipeline/
 > **Note on MediaPipe Compatibility:**
 > This repository strictly pins `mediapipe==0.10.14` and relies on Python 3.10. MediaPipe versions >= 0.10.30 have removed the Legacy Solutions API, which this pipeline is built upon. 
 
-You need a Supabase project to use the Streamlit interface. Create a `.env` file in the root directory:
+You need a Supabase project to use the Streamlit interface. Copy `.env.example` to `.env` and fill in your values (or create `.env` manually):
 ```env
 SUPABASE_URL="your-project-url"
 SUPABASE_KEY="your-anon-key"
