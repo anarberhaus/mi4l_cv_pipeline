@@ -1,7 +1,7 @@
 """
 MI4L Movement Analysis — Streamlit UI
 ======================================
-Professional front-end for the MI4L CV pipeline.
+
 Run with:  streamlit run app.py
 """
 from __future__ import annotations
