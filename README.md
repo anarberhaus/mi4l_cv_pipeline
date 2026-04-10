@@ -1,4 +1,4 @@
-# MI4L CV Pipeline
+# MWI CV Pipeline
 
 Computer-vision pipeline that estimates joint angles from RGB video and computes **AROM**, **PROM**, and the **Mobility Index for Longevity (MI4L)** score.
 
@@ -23,7 +23,7 @@ Computer-vision pipeline that estimates joint angles from RGB video and computes
 ## Project structure
 
 ```
-mi4l_cv_pipeline/
+mwi_cv_pipeline/
 ├── src/mi4l/
 │   ├── angles/       # Joint angle computation (per pose)
 │   ├── io/           # Landmark / CSV / config I/O
